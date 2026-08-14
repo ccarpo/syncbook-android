@@ -28,9 +28,11 @@ class SyncTransport(
     private var socket: WebSocket? = null
     private var sentStateVector: List<UByte> = emptyList()
     private var observing = false
+    private var applyingRemoteMessage = false
 
     private val observer = object : SyncDocObserver {
         override fun changed() {
+            if (applyingRemoteMessage) return
             val update = doc.encodeStateAsUpdate(sentStateVector)
             if (update.isNotEmpty()) {
                 socket?.send(ByteString.of(*doc.encodeUpdateMessage(update).toByteArray()))
@@ -73,9 +75,14 @@ class SyncTransport(
         }
 
         override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-            val replies = doc.handleMessage(bytes.toByteArray().map { it.toUByte() })
-            replies.forEach { reply ->
-                webSocket.send(ByteString.of(*reply.toByteArray()))
+            applyingRemoteMessage = true
+            try {
+                val replies = doc.handleMessage(bytes.toByteArray().map { it.toUByte() })
+                replies.forEach { reply ->
+                    webSocket.send(ByteString.of(*reply.toByteArray()))
+                }
+            } finally {
+                applyingRemoteMessage = false
             }
         }
 

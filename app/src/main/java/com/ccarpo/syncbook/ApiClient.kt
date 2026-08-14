@@ -18,6 +18,19 @@ data class Note(
     val deleted: Boolean,
 )
 
+data class Snapshot(
+    val id: String,
+    val createdAt: String,
+    val excerpt: String,
+)
+
+data class SnapshotDetail(
+    val id: String,
+    val createdAt: String,
+    val excerpt: String,
+    val state: String,
+)
+
 class ApiClient(
     private val client: OkHttpClient,
     baseUrl: String,
@@ -59,6 +72,32 @@ class ApiClient(
 
     suspend fun restoreNote(token: String, id: String) {
         request("POST", "/api/notes/$id/restore", token)
+    }
+
+    suspend fun history(token: String, noteId: String): List<Snapshot> {
+        val array = JSONArray(request("GET", "/api/notes/$noteId/history", token))
+        return (0 until array.length()).map { index ->
+            val snapshot = array.getJSONObject(index)
+            Snapshot(
+                id = snapshot.getString("id"),
+                createdAt = snapshot.getString("created_at"),
+                excerpt = snapshot.optString("excerpt"),
+            )
+        }
+    }
+
+    suspend fun snapshot(token: String, noteId: String, snapshotId: String): SnapshotDetail {
+        val snapshot = JSONObject(request("GET", "/api/notes/$noteId/history/$snapshotId", token))
+        return SnapshotDetail(
+            id = snapshot.getString("id"),
+            createdAt = snapshot.getString("created_at"),
+            excerpt = snapshot.optString("excerpt"),
+            state = snapshot.getString("state"),
+        )
+    }
+
+    suspend fun restoreSnapshot(token: String, noteId: String, snapshotId: String) {
+        request("POST", "/api/notes/$noteId/history/$snapshotId/restore", token)
     }
 
     private suspend fun post(path: String, payload: JSONObject, token: String? = null): JSONObject {

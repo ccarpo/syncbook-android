@@ -5,6 +5,10 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
 class SessionStore(context: Context) {
+    companion object {
+        const val DEFAULT_BASE_URL = "http://10.0.2.2:8080"
+    }
+
     private val preferences = EncryptedSharedPreferences.create(
         context,
         "syncbook-session",
@@ -19,5 +23,11 @@ class SessionStore(context: Context) {
             preferences.edit().apply {
                 if (value == null) remove("token") else putString("token", value)
             }.apply()
+        }
+
+    var baseUrl: String
+        get() = preferences.getString("base_url", DEFAULT_BASE_URL) ?: DEFAULT_BASE_URL
+        set(value) {
+            preferences.edit().putString("base_url", value.trimEnd('/')).apply()
         }
 }

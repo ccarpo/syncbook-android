@@ -1,6 +1,8 @@
 package com.ccarpo.syncbook
 
 import android.os.Bundle
+import android.content.Context
+import android.util.Base64
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
@@ -32,8 +34,6 @@ import okhttp3.OkHttpClient
 import uniffi.syncbook.BlockKind
 import uniffi.syncbook.SyncDoc
 
-private const val DEFAULT_BASE_URL = "http://10.0.2.2:8080"
-
 class MainActivity : ComponentActivity() {
     private val httpClient = OkHttpClient()
 
@@ -42,9 +42,10 @@ class MainActivity : ComponentActivity() {
         val session = SessionStore(this)
         setContent {
             var token by remember { mutableStateOf(session.token) }
+            var baseUrl by remember { mutableStateOf(session.baseUrl) }
             MaterialTheme {
                 if (token == null) {
-                    LoginScreen { newToken ->
+                    LoginScreen(baseUrl) { newToken ->
                         session.token = newToken
                         token = newToken
                     }
@@ -52,6 +53,12 @@ class MainActivity : ComponentActivity() {
                     NotesScreen(
                         client = httpClient,
                         token = token!!,
+                        baseUrl = baseUrl,
+                        onBaseUrlChanged = {
+                            session.baseUrl = it
+                            baseUrl = session.baseUrl
+                        },
+                        context = applicationContext,
                         onLogout = {
                             session.token = null
                             token = null
@@ -64,7 +71,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun LoginScreen(onAuthenticated: (String) -> Unit) {
+private fun LoginScreen(baseUrl: String, onAuthenticated: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -82,7 +89,7 @@ private fun LoginScreen(onAuthenticated: (String) -> Unit) {
             onClick = {
                 scope.launch {
                     runCatching {
-                        val api = ApiClient(OkHttpClient(), DEFAULT_BASE_URL)
+                        val api = ApiClient(OkHttpClient(), baseUrl)
                         if (registering) api.register(email, password) else api.login(email, password)
                     }.onSuccess(onAuthenticated).onFailure { error = it.message }
                 }
@@ -101,10 +108,14 @@ private fun LoginScreen(onAuthenticated: (String) -> Unit) {
 private fun NotesScreen(
     client: OkHttpClient,
     token: String,
+    baseUrl: String,
+    onBaseUrlChanged: (String) -> Unit,
+    context: Context,
     onLogout: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val api = remember { ApiClient(client, DEFAULT_BASE_URL) }
+    val api = remember(baseUrl) { ApiClient(client, baseUrl) }
+    var editableBaseUrl by remember(baseUrl) { mutableStateOf(baseUrl) }
     var notes by remember { mutableStateOf<List<Note>>(emptyList()) }
     var selected by remember { mutableStateOf<Note?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -119,13 +130,13 @@ private fun NotesScreen(
 
     LaunchedEffect(token) { refresh() }
     DisposableEffect(token) {
-        val events = UserEventsTransport(client, DEFAULT_BASE_URL, token, ::refresh, onLogout)
+        val events = UserEventsTransport(client, baseUrl, token, ::refresh, onLogout)
         events.connect()
         onDispose { events.close() }
     }
 
     selected?.let { note ->
-        EditorScreen(client, token, note, onLogout) { selected = null }
+        EditorScreen(client, token, baseUrl, context, note, onLogout) { selected = null }
         return
     }
 
@@ -147,6 +158,16 @@ private fun NotesScreen(
                 Text("+")
             }
             OutlinedButton(onClick = onLogout) { Text("Log out") }
+        }
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = editableBaseUrl,
+            onValueChange = { editableBaseUrl = it },
+            label = { Text("Server base URL") },
+            singleLine = true,
+        )
+        OutlinedButton(onClick = { onBaseUrlChanged(editableBaseUrl) }) {
+            Text("Save server URL")
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         LazyColumn {
@@ -177,21 +198,31 @@ private fun NotesScreen(
 private fun EditorScreen(
     client: OkHttpClient,
     token: String,
+    baseUrl: String,
+    context: Context,
     note: Note,
     onUnauthorized: () -> Unit,
     onBack: () -> Unit,
 ) {
-    val doc = remember(note.id) { SyncDoc() }
+    val persistence = remember { NotePersistence(context) }
+    val doc = remember(note.id) {
+        SyncDoc().also { persistence.load(note.id, it) }
+    }
     var blocks by remember(note.id) {
         if (doc.blocks().isEmpty()) {
             doc.insertText("", 0u, "")
         }
         mutableStateOf(doc.blocks())
     }
+    val api = remember(baseUrl) { ApiClient(client, baseUrl) }
+    val scope = rememberCoroutineScope()
+    var historyVisible by remember { mutableStateOf(false) }
+    var snapshots by remember { mutableStateOf<List<Snapshot>>(emptyList()) }
+    var preview by remember { mutableStateOf<List<uniffi.syncbook.Block>?>(null) }
     DisposableEffect(note.id) {
         val transport = SyncTransport(
             client = client,
-            baseUrl = DEFAULT_BASE_URL,
+            baseUrl = baseUrl,
             noteId = note.id,
             token = token,
             doc = doc,
@@ -201,6 +232,7 @@ private fun EditorScreen(
         transport.connect()
         onDispose {
             transport.close()
+            persistence.save(note.id, doc)
             doc.close()
         }
     }
@@ -208,26 +240,86 @@ private fun EditorScreen(
         modifier = Modifier.fillMaxSize().padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Button(onClick = onBack) { Text("Back") }
-        blocks.forEach { block ->
-            Row(modifier = Modifier.fillMaxWidth()) {
-                if (block.kind == BlockKind.TASK_ITEM) {
-                    Checkbox(
-                        checked = block.checked,
-                        onCheckedChange = {
-                            doc.setChecked(block.id, it)
-                            blocks = doc.blocks()
-                        },
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = onBack) { Text("Back") }
+            OutlinedButton(onClick = {
+                historyVisible = !historyVisible
+                if (!historyVisible) preview = null
+            }) { Text(if (historyVisible) "Editor" else "History") }
+        }
+        if (historyVisible) {
+            LaunchedEffect(Unit) {
+                runCatching { api.history(token, note.id) }
+                    .onSuccess { snapshots = it }
+            }
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(snapshots, key = { it.id }) { snapshot ->
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = snapshot.excerpt.ifBlank { "Untitled snapshot" },
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text(snapshot.createdAt) },
                     )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = {
+                            scope.launch {
+                                runCatching { api.snapshot(token, note.id, snapshot.id) }
+                                    .onSuccess { detail ->
+                                        val snapshotDoc = SyncDoc()
+                                        snapshotDoc.applyUpdate(
+                                            Base64.decode(detail.state, Base64.DEFAULT)
+                                                .map { it.toUByte() },
+                                        )
+                                        preview = snapshotDoc.blocks()
+                                        snapshotDoc.close()
+                                    }
+                            }
+                        }) { Text("Preview") }
+                        Button(onClick = {
+                            scope.launch {
+                                runCatching {
+                                    api.restoreSnapshot(token, note.id, snapshot.id)
+                                }.onSuccess {
+                                    historyVisible = false
+                                }
+                            }
+                        }) { Text("Restore") }
+                    }
                 }
+            }
+            preview?.let { previewBlocks ->
+                Text("Read-only preview", style = MaterialTheme.typography.titleMedium)
+                previewBlocks.forEach { block ->
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        if (block.kind == BlockKind.TASK_ITEM) {
+                            Checkbox(checked = block.checked, onCheckedChange = null)
+                        }
+                        Text(block.text, modifier = Modifier.padding(8.dp))
+                    }
+                }
+            }
+        } else {
+            blocks.forEach { block ->
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    if (block.kind == BlockKind.TASK_ITEM) {
+                        Checkbox(
+                            checked = block.checked,
+                            onCheckedChange = {
+                                doc.setChecked(block.id, it)
+                                blocks = doc.blocks()
+                            },
+                        )
+                    }
                     OutlinedTextField(
                         modifier = Modifier.weight(1f),
                         value = block.text,
                         onValueChange = { value ->
-                        applyTextEdit(doc, block.id, block.text, value)
-                        blocks = doc.blocks()
-                    },
-                )
+                            applyTextEdit(doc, block.id, block.text, value)
+                            blocks = doc.blocks()
+                        },
+                    )
+                }
             }
         }
     }

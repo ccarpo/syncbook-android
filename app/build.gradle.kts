@@ -44,6 +44,32 @@ android {
     }
 }
 
+val buildRustAndroid by tasks.registering(Exec::class) {
+    workingDir(rootProject.file("rust"))
+    environment("ANDROID_HOME", System.getenv("ANDROID_HOME") ?: "/home/ubuntu/android-sdk")
+    environment(
+        "ANDROID_NDK_HOME",
+        System.getenv("ANDROID_NDK_HOME")
+            ?: "${System.getenv("ANDROID_HOME") ?: "/home/ubuntu/android-sdk"}/ndk/27.2.12479018",
+    )
+    commandLine(
+        "bash",
+        "-lc",
+        """
+        cargo ndk -t arm64-v8a -t x86_64 -o '${projectDir.resolve("src/main/jniLibs").absolutePath}' build --release
+        for abi in arm64-v8a x86_64; do
+          cp '${projectDir.resolve("src/main/jniLibs").absolutePath}'/${'$'}{abi}/libsyncbook.so \
+             '${projectDir.resolve("src/main/jniLibs").absolutePath}'/${'$'}{abi}/libuniffi_syncbook.so
+        done
+        """.trimIndent(),
+    )
+    outputs.dir(projectDir.resolve("src/main/jniLibs"))
+}
+
+tasks.named("preBuild") {
+    dependsOn(buildRustAndroid)
+}
+
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.activity:activity-compose:1.10.0")
