@@ -1,6 +1,8 @@
 package com.ccarpo.syncbook
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.content.Context
 import android.util.Base64
 import androidx.activity.ComponentActivity
@@ -29,10 +31,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import uniffi.syncbook.BlockKind
 import uniffi.syncbook.SyncDoc
+import uniffi.syncbook.SyncDocObserver
 
 class MainActivity : ComponentActivity() {
     private val httpClient = OkHttpClient()
@@ -71,40 +75,6 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun LoginScreen(baseUrl: String, onAuthenticated: (String) -> Unit) {
-    val scope = rememberCoroutineScope()
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var registering by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text("Syncbook", style = MaterialTheme.typography.headlineMedium)
-        OutlinedTextField(email, { email = it }, label = { Text("Email") })
-        OutlinedTextField(password, { password = it }, label = { Text("Password") })
-        Button(
-            modifier = Modifier.fillMaxWidth(),
-            onClick = {
-                scope.launch {
-                    runCatching {
-                        val api = ApiClient(OkHttpClient(), baseUrl)
-                        if (registering) api.register(email, password) else api.login(email, password)
-                    }.onSuccess(onAuthenticated).onFailure { error = it.message }
-                }
-            },
-        ) {
-            Text(if (registering) "Register" else "Log in")
-        }
-        OutlinedButton(onClick = { registering = !registering }) {
-            Text(if (registering) "Use existing account" else "Create account")
-        }
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-    }
-}
-
-@Composable
 private fun NotesScreen(
     client: OkHttpClient,
     token: String,
@@ -117,18 +87,20 @@ private fun NotesScreen(
     val api = remember(baseUrl) { ApiClient(client, baseUrl) }
     var editableBaseUrl by remember(baseUrl) { mutableStateOf(baseUrl) }
     var notes by remember { mutableStateOf<List<Note>>(emptyList()) }
+    var trash by remember { mutableStateOf(false) }
+    var search by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf<Note?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
     fun refresh() {
         scope.launch {
-            runCatching { api.notes(token) }
+            runCatching { api.notes(token, trash) }
                 .onSuccess { notes = it }
                 .onFailure { error = it.message }
         }
     }
 
-    LaunchedEffect(token) { refresh() }
+    LaunchedEffect(token, trash) { refresh() }
     DisposableEffect(token) {
         val events = UserEventsTransport(client, baseUrl, token, ::refresh, onLogout)
         events.connect()
@@ -158,7 +130,17 @@ private fun NotesScreen(
                 Text("+")
             }
             OutlinedButton(onClick = onLogout) { Text("Log out") }
+            OutlinedButton(onClick = { trash = !trash }) {
+                Text(if (trash) "Notes" else "Trash")
+            }
         }
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = search,
+            onValueChange = { search = it },
+            label = { Text("Search") },
+            singleLine = true,
+        )
         OutlinedTextField(
             modifier = Modifier.fillMaxWidth(),
             value = editableBaseUrl,
@@ -171,7 +153,14 @@ private fun NotesScreen(
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         LazyColumn {
-            items(notes, key = { it.id }) { note ->
+            items(
+                notes.filter {
+                    search.isBlank() ||
+                        it.title.contains(search, ignoreCase = true) ||
+                        it.excerpt.contains(search, ignoreCase = true)
+                },
+                key = { it.id },
+            ) { note ->
                 Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
                     Button(
                         modifier = Modifier.weight(1f),
@@ -181,12 +170,15 @@ private fun NotesScreen(
                     }
                     OutlinedButton(onClick = {
                         scope.launch {
-                            runCatching { api.deleteNote(token, note.id) }
+                            runCatching {
+                                if (trash) api.restoreNote(token, note.id)
+                                else api.deleteNote(token, note.id)
+                            }
                                 .onSuccess { refresh() }
                                 .onFailure { error = it.message }
                         }
                     }) {
-                        Text("Delete")
+                        Text(if (trash) "Restore" else "Delete")
                     }
                 }
             }
@@ -208,17 +200,24 @@ private fun EditorScreen(
     val doc = remember(note.id) {
         SyncDoc().also { persistence.load(note.id, it) }
     }
-    var blocks by remember(note.id) {
-        if (doc.blocks().isEmpty()) {
-            doc.insertText("", 0u, "")
-        }
-        mutableStateOf(doc.blocks())
-    }
+    var blocks by remember(note.id) { mutableStateOf(doc.blocks()) }
     val api = remember(baseUrl) { ApiClient(client, baseUrl) }
     val scope = rememberCoroutineScope()
     var historyVisible by remember { mutableStateOf(false) }
     var snapshots by remember { mutableStateOf<List<Snapshot>>(emptyList()) }
     var preview by remember { mutableStateOf<List<uniffi.syncbook.Block>?>(null) }
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    val renderObserver = remember(doc) {
+        object : SyncDocObserver {
+            override fun changed() {
+                mainHandler.post { blocks = doc.blocks() }
+            }
+        }
+    }
+    DisposableEffect(doc) {
+        doc.observe(renderObserver)
+        onDispose { doc.clearObservers() }
+    }
     DisposableEffect(note.id) {
         val transport = SyncTransport(
             client = client,
@@ -268,8 +267,7 @@ private fun EditorScreen(
                                     .onSuccess { detail ->
                                         val snapshotDoc = SyncDoc()
                                         snapshotDoc.applyUpdate(
-                                            Base64.decode(detail.state, Base64.DEFAULT)
-                                                .map { it.toUByte() },
+                                            Base64.decode(detail.state, Base64.DEFAULT),
                                         )
                                         preview = snapshotDoc.blocks()
                                         snapshotDoc.close()
@@ -300,7 +298,20 @@ private fun EditorScreen(
                 }
             }
         } else {
-            blocks.forEach { block ->
+            if (blocks.isEmpty()) {
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = "",
+                    onValueChange = { value ->
+                        if (value.isNotEmpty()) {
+                            doc.insertText("", 0u, value)
+                            blocks = doc.blocks()
+                        }
+                    },
+                    label = { Text("Start writing") },
+                )
+            }
+            blocks.forEachIndexed { index, block ->
                 Row(modifier = Modifier.fillMaxWidth()) {
                     if (block.kind == BlockKind.TASK_ITEM) {
                         Checkbox(
@@ -311,11 +322,32 @@ private fun EditorScreen(
                             },
                         )
                     }
+                    if (block.kind == BlockKind.PARAGRAPH) {
+                        OutlinedButton(onClick = {
+                            doc.toggleTaskList(block.id)
+                            blocks = doc.blocks()
+                        }) { Text("Checklist") }
+                    }
                     OutlinedTextField(
                         modifier = Modifier.weight(1f),
                         value = block.text,
+                        singleLine = false,
                         onValueChange = { value ->
-                            applyTextEdit(doc, block.id, block.text, value)
+                            val newline = value.indexOf('\n')
+                            if (newline >= 0) {
+                                val before = value.substring(0, newline)
+                                val after = value.substring(newline + 1)
+                                applyTextEdit(doc, block.id, block.text, before)
+                                doc.splitBlock(block.id, before.utf16Length().toUInt())
+                                if (after.isNotEmpty()) {
+                                    val next = doc.blocks().getOrNull(index + 1)
+                                    if (next != null) {
+                                        doc.insertText(next.id, 0u, after)
+                                    }
+                                }
+                            } else {
+                                applyTextEdit(doc, block.id, block.text, value)
+                            }
                             blocks = doc.blocks()
                         },
                     )
@@ -324,6 +356,8 @@ private fun EditorScreen(
         }
     }
 }
+
+private fun String.utf16Length(): Int = length
 
 private fun applyTextEdit(doc: SyncDoc, blockId: String, oldText: String, newText: String) {
     var prefix = 0

@@ -1,8 +1,22 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+val localProperties = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+}
+val androidSdk = System.getenv("ANDROID_HOME")
+    ?: System.getenv("ANDROID_SDK_ROOT")
+    ?: localProperties.getProperty("sdk.dir")
+    ?: error("Android SDK not found. Set ANDROID_HOME or sdk.dir in local.properties.")
+val androidNdk = System.getenv("ANDROID_NDK_HOME")
+    ?: localProperties.getProperty("ndk.dir")
+    ?: error("Android NDK not found. Set ANDROID_NDK_HOME or ndk.dir in local.properties.")
+val generatedUniFfiDir = layout.buildDirectory.dir("generated/uniffi/main")
 
 android {
     namespace = "com.ccarpo.syncbook"
@@ -23,6 +37,7 @@ android {
     }
 
     sourceSets["main"].jniLibs.srcDir("src/main/jniLibs")
+    sourceSets["main"].java.srcDir(generatedUniFfiDir)
 
     testOptions {
         unitTests.all { test ->
@@ -44,30 +59,65 @@ android {
     }
 }
 
+val generateUniFfiKotlin by tasks.registering(Exec::class) {
+    workingDir(rootProject.file("rust"))
+    commandLine(
+        "uniffi-bindgen",
+        "generate",
+        "src/syncbook.udl",
+        "--language",
+        "kotlin",
+        "--out-dir",
+        generatedUniFfiDir.get().asFile.absolutePath,
+        "--no-format",
+    )
+    outputs.dir(generatedUniFfiDir)
+}
+
 val buildRustAndroid by tasks.registering(Exec::class) {
     workingDir(rootProject.file("rust"))
-    environment("ANDROID_HOME", System.getenv("ANDROID_HOME") ?: "/home/ubuntu/android-sdk")
-    environment(
-        "ANDROID_NDK_HOME",
-        System.getenv("ANDROID_NDK_HOME")
-            ?: "${System.getenv("ANDROID_HOME") ?: "/home/ubuntu/android-sdk"}/ndk/27.2.12479018",
-    )
+    environment("ANDROID_HOME", androidSdk)
+    environment("ANDROID_NDK_HOME", androidNdk)
     commandLine(
         "bash",
         "-lc",
         """
         cargo ndk -t arm64-v8a -t x86_64 -o '${projectDir.resolve("src/main/jniLibs").absolutePath}' build --release
-        for abi in arm64-v8a x86_64; do
-          cp '${projectDir.resolve("src/main/jniLibs").absolutePath}'/${'$'}{abi}/libsyncbook.so \
-             '${projectDir.resolve("src/main/jniLibs").absolutePath}'/${'$'}{abi}/libuniffi_syncbook.so
-        done
         """.trimIndent(),
     )
     outputs.dir(projectDir.resolve("src/main/jniLibs"))
+    inputs.dir(rootProject.file("rust/src"))
+    inputs.file(rootProject.file("rust/Cargo.toml"))
+    inputs.file(rootProject.file("rust/Cargo.lock"))
+}
+
+val buildRustHost by tasks.registering(Exec::class) {
+    workingDir(rootProject.file("rust"))
+    commandLine(
+        "bash",
+        "-lc",
+        """
+        cargo build
+        mkdir -p '${projectDir.resolve("src/test/jniLibs").absolutePath}'
+        cp target/debug/libuniffi_syncbook.so '${projectDir.resolve("src/test/jniLibs").absolutePath}/libuniffi_syncbook.so'
+        """.trimIndent(),
+    )
+    outputs.file(projectDir.resolve("src/test/jniLibs/libuniffi_syncbook.so"))
+    inputs.dir(rootProject.file("rust/src"))
+    inputs.file(rootProject.file("rust/Cargo.toml"))
+    inputs.file(rootProject.file("rust/Cargo.lock"))
 }
 
 tasks.named("preBuild") {
-    dependsOn(buildRustAndroid)
+    dependsOn(buildRustAndroid, generateUniFfiKotlin)
+}
+
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    dependsOn(generateUniFfiKotlin)
+}
+
+tasks.withType<Test>().configureEach {
+    dependsOn(buildRustHost, generateUniFfiKotlin)
 }
 
 dependencies {

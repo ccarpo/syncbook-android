@@ -15,6 +15,7 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 import uniffi.syncbook.SyncDoc
 import uniffi.syncbook.SyncDocObserver
+import uniffi.syncbook.BlockKind
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -33,15 +34,31 @@ class CrossClientSmokeTest {
         left.insertText("", 0u, "")
         connect(client, base, noteId, token, left)
         connect(client, base, noteId, token, right)
+        val rendered = CountDownLatch(1)
+        var renderedText = ""
+        right.observe(object : SyncDocObserver {
+            override fun changed() {
+                renderedText = right.blocks().firstOrNull()?.text.orEmpty()
+                rendered.countDown()
+            }
+        })
         val leftId = left.blocks()[0].id
         left.insertText(leftId, 0u, "Android proxy title")
-        assertTrue(waitFor(15_000) { right.blocks().firstOrNull()?.text == "Android proxy title" })
+        assertTrue(rendered.await(15, TimeUnit.SECONDS))
+        assertEquals("Android proxy title", renderedText)
         val notes = Request.Builder()
             .url("$base/api/notes")
             .header("Authorization", "Bearer $token")
             .build()
             .let { request -> client.newCall(request).execute().use { it.body!!.string() } }
         assertTrue(notes.contains("Android proxy title"))
+        left.toggleTaskList(left.blocks().single().id)
+        assertTrue(waitFor(15_000) { right.blocks().firstOrNull()?.kind == BlockKind.TASK_ITEM })
+        assertEquals("Android proxy title", right.blocks().first().text)
+        val reread = SyncDoc()
+        connect(client, base, noteId, token, reread)
+        assertTrue(waitFor(15_000) { reread.blocks().firstOrNull()?.kind == BlockKind.TASK_ITEM })
+        assertEquals("Android proxy title", reread.blocks().first().text)
     }
 
     private fun connect(
@@ -58,7 +75,7 @@ class CrossClientSmokeTest {
             override fun changed() {
                 val update = doc.encodeStateAsUpdate(null)
                 socket.send(
-                    ByteString.of(*doc.encodeUpdateMessage(update).map { it.toByte() }.toByteArray()),
+                    ByteString.of(*doc.encodeUpdateMessage(update)),
                 )
             }
         })
@@ -66,12 +83,12 @@ class CrossClientSmokeTest {
             Request.Builder().url(url).build(),
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
-                    webSocket.send(ByteString.of(*doc.syncStep1().map { it.toByte() }.toByteArray()))
+                    webSocket.send(ByteString.of(*doc.syncStep1()))
                 }
 
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                    doc.handleMessage(bytes.toByteArray().map { it.toUByte() }).forEach { reply ->
-                        webSocket.send(ByteString.of(*reply.map { it.toByte() }.toByteArray()))
+                    doc.handleMessage(bytes.toByteArray()).forEach { reply ->
+                        webSocket.send(ByteString.of(*reply))
                     }
                 }
             },
