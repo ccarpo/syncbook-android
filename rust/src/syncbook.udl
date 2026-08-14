@@ -12,6 +12,10 @@ dictionary Block {
     boolean checked;
 };
 
+callback interface SyncDocObserver {
+    void changed();
+};
+
 interface Greeting {
     constructor();
     string hello(string name);
@@ -21,7 +25,7 @@ interface SyncDoc {
     constructor();
     void apply_update(sequence<u8> update);
     sequence<u8> state_vector();
-    sequence<u8> encode_state_as_update(sequence<u8> state_vector);
+    sequence<u8> encode_state_as_update(sequence<u8>? state_vector);
     sequence<sequence<u8>> handle_message(sequence<u8> message);
     sequence<Block> blocks();
     void insert_text(string block_id, u32 offset, string text);
@@ -29,4 +33,5 @@ interface SyncDoc {
     void set_checked(string block_id, boolean checked);
     void split_block(string block_id, u32 offset);
     void toggle_task_list(string block_id);
+    void observe(SyncDocObserver observer);
 };

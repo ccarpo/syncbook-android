@@ -650,6 +650,28 @@ internal open class UniffiForeignFutureResultVoid(
 internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
     fun callback(`callbackData`: Long,`result`: UniffiForeignFutureResultVoid.UniffiByValue,)
 }
+internal interface UniffiCallbackInterfaceSyncDocObserverMethod0 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+@Structure.FieldOrder("uniffiFree", "uniffiClone", "changed")
+internal open class UniffiVTableCallbackInterfaceSyncDocObserver(
+    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+    @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+    @JvmField internal var `changed`: UniffiCallbackInterfaceSyncDocObserverMethod0? = null,
+) : Structure() {
+    class UniffiByValue(
+        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+        `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+        `changed`: UniffiCallbackInterfaceSyncDocObserverMethod0? = null,
+    ): UniffiVTableCallbackInterfaceSyncDocObserver(`uniffiFree`,`uniffiClone`,`changed`,), Structure.ByValue
+
+   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceSyncDocObserver) {
+        `uniffiFree` = other.`uniffiFree`
+        `uniffiClone` = other.`uniffiClone`
+        `changed` = other.`changed`
+    }
+
+}
 
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
@@ -675,7 +697,33 @@ internal object IntegrityCheckingUniffiLib {
     }
     external fun uniffi_syncbook_checksum_method_greeting_hello(
     ): Int
+    external fun uniffi_syncbook_checksum_method_syncdoc_apply_update(
+    ): Int
+    external fun uniffi_syncbook_checksum_method_syncdoc_blocks(
+    ): Int
+    external fun uniffi_syncbook_checksum_method_syncdoc_delete_text(
+    ): Int
+    external fun uniffi_syncbook_checksum_method_syncdoc_encode_state_as_update(
+    ): Int
+    external fun uniffi_syncbook_checksum_method_syncdoc_handle_message(
+    ): Int
+    external fun uniffi_syncbook_checksum_method_syncdoc_insert_text(
+    ): Int
+    external fun uniffi_syncbook_checksum_method_syncdoc_observe(
+    ): Int
+    external fun uniffi_syncbook_checksum_method_syncdoc_set_checked(
+    ): Int
+    external fun uniffi_syncbook_checksum_method_syncdoc_split_block(
+    ): Int
+    external fun uniffi_syncbook_checksum_method_syncdoc_state_vector(
+    ): Int
+    external fun uniffi_syncbook_checksum_method_syncdoc_toggle_task_list(
+    ): Int
     external fun uniffi_syncbook_checksum_constructor_greeting_new(
+    ): Int
+    external fun uniffi_syncbook_checksum_constructor_syncdoc_new(
+    ): Int
+    external fun uniffi_syncbook_checksum_method_syncdocobserver_changed(
     ): Int
     external fun ffi_syncbook_uniffi_contract_version(
     ): Int
@@ -693,6 +741,7 @@ internal object UniffiLib {
 
     init {
         Native.register(UniffiLib::class.java, findLibraryName(componentName = "syncbook"))
+        uniffiCallbackInterfaceSyncDocObserver.register(this)
         
     }
     external fun uniffi_syncbook_fn_clone_greeting(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -703,6 +752,36 @@ internal object UniffiLib {
     ): Long
     external fun uniffi_syncbook_fn_method_greeting_hello(`ptr`: Long,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_syncbook_fn_clone_syncdoc(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_syncbook_fn_free_syncdoc(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_syncbook_fn_constructor_syncdoc_new(uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_syncbook_fn_method_syncdoc_apply_update(`ptr`: Long,`update`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_syncbook_fn_method_syncdoc_blocks(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_syncbook_fn_method_syncdoc_delete_text(`ptr`: Long,`blockId`: RustBuffer.ByValue,`offset`: Int,`length`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_syncbook_fn_method_syncdoc_encode_state_as_update(`ptr`: Long,`stateVector`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_syncbook_fn_method_syncdoc_handle_message(`ptr`: Long,`message`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_syncbook_fn_method_syncdoc_insert_text(`ptr`: Long,`blockId`: RustBuffer.ByValue,`offset`: Int,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_syncbook_fn_method_syncdoc_observe(`ptr`: Long,`observer`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_syncbook_fn_method_syncdoc_set_checked(`ptr`: Long,`blockId`: RustBuffer.ByValue,`checked`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_syncbook_fn_method_syncdoc_split_block(`ptr`: Long,`blockId`: RustBuffer.ByValue,`offset`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_syncbook_fn_method_syncdoc_state_vector(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_syncbook_fn_method_syncdoc_toggle_task_list(`ptr`: Long,`blockId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_syncbook_fn_init_callback_vtable_syncdocobserver(`vtable`: UniffiVTableCallbackInterfaceSyncDocObserver,
+    ): Unit
     external fun ffi_syncbook_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun ffi_syncbook_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -825,7 +904,46 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_syncbook_checksum_method_greeting_hello() != 13051) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_syncbook_checksum_method_syncdoc_apply_update() != 39978) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_syncbook_checksum_method_syncdoc_blocks() != 61854) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_syncbook_checksum_method_syncdoc_delete_text() != 54359) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_syncbook_checksum_method_syncdoc_encode_state_as_update() != 64145) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_syncbook_checksum_method_syncdoc_handle_message() != 59106) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_syncbook_checksum_method_syncdoc_insert_text() != 56878) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_syncbook_checksum_method_syncdoc_observe() != 36872) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_syncbook_checksum_method_syncdoc_set_checked() != 14385) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_syncbook_checksum_method_syncdoc_split_block() != 61785) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_syncbook_checksum_method_syncdoc_state_vector() != 32552) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_syncbook_checksum_method_syncdoc_toggle_task_list() != 34489) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_syncbook_checksum_constructor_greeting_new() != 35787) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_syncbook_checksum_constructor_syncdoc_new() != 8414) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_syncbook_checksum_method_syncdocobserver_changed() != 29888) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -919,7 +1037,38 @@ object UniffiWithHandle
  *
  * @suppress
  * */
-object NoHandle
+object NoHandle// Magic number for the Rust proxy to call using the same mechanism as every other method,
+// to free the callback once it's dropped by Rust.
+internal const val IDX_CALLBACK_FREE = 0
+// Callback return codes
+internal const val UNIFFI_CALLBACK_SUCCESS = 0
+internal const val UNIFFI_CALLBACK_ERROR = 1
+internal const val UNIFFI_CALLBACK_UNEXPECTED_ERROR = 2
+
+/**
+ * @suppress
+ */
+public abstract class FfiConverterCallbackInterface<CallbackInterface: Any>: FfiConverter<CallbackInterface, Long> {
+    internal val handleMap = UniffiHandleMap<CallbackInterface>()
+
+    internal fun drop(handle: Long) {
+        handleMap.remove(handle)
+    }
+
+    override fun lift(value: Long): CallbackInterface {
+        return handleMap.get(value)
+    }
+
+    override fun read(buf: ByteBuffer) = lift(buf.getLong())
+
+    override fun lower(value: CallbackInterface) = handleMap.insert(value)
+
+    override fun allocationSize(value: CallbackInterface) = 8UL
+
+    override fun write(value: CallbackInterface, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
 /**
  * The cleaner interface for Object finalization code to run.
  * This is the entry point to any implementation that we're using.
@@ -983,6 +1132,79 @@ private class JavaLangRefCleanable(
     val cleanable: java.lang.ref.Cleaner.Cleanable
 ) : UniffiCleaner.Cleanable {
     override fun clean() = cleanable.clean()
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterUByte: FfiConverter<UByte, Byte> {
+    override fun lift(value: Byte): UByte {
+        return value.toUByte()
+    }
+
+    fun lift(value: Int): UByte {
+        return value.toUByte()
+    }
+
+    override fun read(buf: ByteBuffer): UByte {
+        return lift(buf.get())
+    }
+
+    override fun lower(value: UByte): Byte {
+        return value.toByte()
+    }
+
+    override fun allocationSize(value: UByte) = 1UL
+
+    override fun write(value: UByte, buf: ByteBuffer) {
+        buf.put(value.toByte())
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterUInt: FfiConverter<UInt, Int> {
+    override fun lift(value: Int): UInt {
+        return value.toUInt()
+    }
+
+    override fun read(buf: ByteBuffer): UInt {
+        return lift(buf.getInt())
+    }
+
+    override fun lower(value: UInt): Int {
+        return value.toInt()
+    }
+
+    override fun allocationSize(value: UInt) = 4UL
+
+    override fun write(value: UInt, buf: ByteBuffer) {
+        buf.putInt(value.toInt())
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterBoolean: FfiConverter<Boolean, Byte> {
+    override fun lift(value: Byte): Boolean {
+        return value.toInt() != 0
+    }
+
+    override fun read(buf: ByteBuffer): Boolean {
+        return lift(buf.get())
+    }
+
+    override fun lower(value: Boolean): Byte {
+        return if (value) 1.toByte() else 0.toByte()
+    }
+
+    override fun allocationSize(value: Boolean) = 1UL
+
+    override fun write(value: Boolean, buf: ByteBuffer) {
+        buf.put(lower(value))
+    }
 }
 
 /**
@@ -1303,6 +1525,684 @@ public object FfiConverterTypeGreeting: FfiConverter<Greeting, Long> {
 
     override fun write(value: Greeting, buf: ByteBuffer) {
         buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+public interface SyncDocInterface {
+    
+    fun `applyUpdate`(`update`: List<kotlin.UByte>)
+    
+    fun `blocks`(): List<Block>
+    
+    fun `deleteText`(`blockId`: kotlin.String, `offset`: kotlin.UInt, `length`: kotlin.UInt)
+    
+    fun `encodeStateAsUpdate`(`stateVector`: List<kotlin.UByte>?): List<kotlin.UByte>
+    
+    fun `handleMessage`(`message`: List<kotlin.UByte>): List<List<kotlin.UByte>>
+    
+    fun `insertText`(`blockId`: kotlin.String, `offset`: kotlin.UInt, `text`: kotlin.String)
+    
+    fun `observe`(`observer`: SyncDocObserver)
+    
+    fun `setChecked`(`blockId`: kotlin.String, `checked`: kotlin.Boolean)
+    
+    fun `splitBlock`(`blockId`: kotlin.String, `offset`: kotlin.UInt)
+    
+    fun `stateVector`(): List<kotlin.UByte>
+    
+    fun `toggleTaskList`(`blockId`: kotlin.String)
+    
+    companion object
+}
+
+open class SyncDoc: Disposable, AutoCloseable, SyncDocInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+    constructor() :
+        this(UniffiWithHandle, 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_syncbook_fn_constructor_syncdoc_new(
+    
+        _status)
+}
+    )
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    /**
+     * Whether the current object has been destroyed and its reference is gone in the Rust side.
+     */
+    val uniffiIsDestroyed: Boolean get() = wasDestroyed.get()
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_syncbook_fn_free_syncdoc(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_syncbook_fn_clone_syncdoc(handle, status)
+        }
+    }
+
+    override fun `applyUpdate`(`update`: List<kotlin.UByte>)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_syncbook_fn_method_syncdoc_apply_update(
+        it,
+        
+        FfiConverterSequenceUByte.lower(`update`),_status)
+}
+    }
+    
+    
+
+    override fun `blocks`(): List<Block> {
+            return FfiConverterSequenceTypeBlock.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_syncbook_fn_method_syncdoc_blocks(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `deleteText`(`blockId`: kotlin.String, `offset`: kotlin.UInt, `length`: kotlin.UInt)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_syncbook_fn_method_syncdoc_delete_text(
+        it,
+        
+        FfiConverterString.lower(`blockId`),
+        FfiConverterUInt.lower(`offset`),
+        FfiConverterUInt.lower(`length`),_status)
+}
+    }
+    
+    
+
+    override fun `encodeStateAsUpdate`(`stateVector`: List<kotlin.UByte>?): List<kotlin.UByte> {
+            return FfiConverterSequenceUByte.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_syncbook_fn_method_syncdoc_encode_state_as_update(
+        it,
+        
+        FfiConverterOptionalSequenceUByte.lower(`stateVector`),_status)
+}
+    }
+    )
+    }
+    
+
+    override fun `handleMessage`(`message`: List<kotlin.UByte>): List<List<kotlin.UByte>> {
+            return FfiConverterSequenceSequenceUByte.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_syncbook_fn_method_syncdoc_handle_message(
+        it,
+        
+        FfiConverterSequenceUByte.lower(`message`),_status)
+}
+    }
+    )
+    }
+    
+
+    override fun `insertText`(`blockId`: kotlin.String, `offset`: kotlin.UInt, `text`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_syncbook_fn_method_syncdoc_insert_text(
+        it,
+        
+        FfiConverterString.lower(`blockId`),
+        FfiConverterUInt.lower(`offset`),
+        FfiConverterString.lower(`text`),_status)
+}
+    }
+    
+    
+
+    override fun `observe`(`observer`: SyncDocObserver)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_syncbook_fn_method_syncdoc_observe(
+        it,
+        
+        FfiConverterTypeSyncDocObserver.lower(`observer`),_status)
+}
+    }
+    
+    
+
+    override fun `setChecked`(`blockId`: kotlin.String, `checked`: kotlin.Boolean)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_syncbook_fn_method_syncdoc_set_checked(
+        it,
+        
+        FfiConverterString.lower(`blockId`),
+        FfiConverterBoolean.lower(`checked`),_status)
+}
+    }
+    
+    
+
+    override fun `splitBlock`(`blockId`: kotlin.String, `offset`: kotlin.UInt)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_syncbook_fn_method_syncdoc_split_block(
+        it,
+        
+        FfiConverterString.lower(`blockId`),
+        FfiConverterUInt.lower(`offset`),_status)
+}
+    }
+    
+    
+
+    override fun `stateVector`(): List<kotlin.UByte> {
+            return FfiConverterSequenceUByte.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_syncbook_fn_method_syncdoc_state_vector(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `toggleTaskList`(`blockId`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_syncbook_fn_method_syncdoc_toggle_task_list(
+        it,
+        
+        FfiConverterString.lower(`blockId`),_status)
+}
+    }
+    
+    
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSyncDoc: FfiConverter<SyncDoc, Long> {
+    override fun lower(value: SyncDoc): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): SyncDoc {
+        return SyncDoc(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): SyncDoc {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: SyncDoc) = 8UL
+
+    override fun write(value: SyncDoc, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+
+data class Block (
+    var `id`: kotlin.String
+    , 
+    var `kind`: BlockKind
+    , 
+    var `text`: kotlin.String
+    , 
+    var `checked`: kotlin.Boolean
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBlock: FfiConverterRustBuffer<Block> {
+    override fun read(buf: ByteBuffer): Block {
+        return Block(
+            FfiConverterString.read(buf),
+            FfiConverterTypeBlockKind.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: Block) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterTypeBlockKind.allocationSize(value.`kind`) +
+            FfiConverterString.allocationSize(value.`text`) +
+            FfiConverterBoolean.allocationSize(value.`checked`)
+    )
+
+    override fun write(value: Block, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterTypeBlockKind.write(value.`kind`, buf)
+            FfiConverterString.write(value.`text`, buf)
+            FfiConverterBoolean.write(value.`checked`, buf)
+    }
+}
+
+
+
+
+enum class BlockKind {
+    
+    PARAGRAPH,
+    TASK_ITEM;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBlockKind: FfiConverterRustBuffer<BlockKind> {
+    override fun read(buf: ByteBuffer) = try {
+        BlockKind.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: BlockKind) = 4UL
+
+    override fun write(value: BlockKind, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+
+public interface SyncDocObserver {
+    
+    fun `changed`()
+    
+    companion object
+}
+
+
+
+// Put the implementation in an object so we don't pollute the top-level namespace
+internal object uniffiCallbackInterfaceSyncDocObserver {
+    internal object `changed`: UniffiCallbackInterfaceSyncDocObserverMethod0 {
+        override fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeSyncDocObserver.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`changed`(
+                )
+            }
+            val writeReturn = { _: Unit -> Unit }
+            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
+        }
+    }
+
+    internal object uniffiFree: UniffiCallbackInterfaceFree {
+        override fun callback(handle: Long) {
+            FfiConverterTypeSyncDocObserver.handleMap.remove(handle)
+        }
+    }
+
+    internal object uniffiClone: UniffiCallbackInterfaceClone {
+        override fun callback(handle: Long): Long {
+            return FfiConverterTypeSyncDocObserver.handleMap.clone(handle)
+        }
+    }
+
+    internal var vtable = UniffiVTableCallbackInterfaceSyncDocObserver.UniffiByValue(
+        uniffiFree,
+        uniffiClone,
+        `changed`,
+    )
+
+    // Registers the foreign callback with the Rust side.
+    // This method is generated for each callback interface.
+    internal fun register(lib: UniffiLib) {
+        lib.uniffi_syncbook_fn_init_callback_vtable_syncdocobserver(vtable)
+    }
+}
+
+/**
+ * The ffiConverter which transforms the Callbacks in to handles to pass to Rust.
+ *
+ * @suppress
+ */
+public object FfiConverterTypeSyncDocObserver: FfiConverterCallbackInterface<SyncDocObserver>()
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalSequenceUByte: FfiConverterRustBuffer<List<kotlin.UByte>?> {
+    override fun read(buf: ByteBuffer): List<kotlin.UByte>? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterSequenceUByte.read(buf)
+    }
+
+    override fun allocationSize(value: List<kotlin.UByte>?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterSequenceUByte.allocationSize(value)
+        }
+    }
+
+    override fun write(value: List<kotlin.UByte>?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterSequenceUByte.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceUByte: FfiConverterRustBuffer<List<kotlin.UByte>> {
+    override fun read(buf: ByteBuffer): List<kotlin.UByte> {
+        val len = buf.getInt()
+        return List<kotlin.UByte>(len) {
+            FfiConverterUByte.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<kotlin.UByte>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterUByte.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<kotlin.UByte>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterUByte.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeBlock: FfiConverterRustBuffer<List<Block>> {
+    override fun read(buf: ByteBuffer): List<Block> {
+        val len = buf.getInt()
+        return List<Block>(len) {
+            FfiConverterTypeBlock.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<Block>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeBlock.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<Block>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeBlock.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceSequenceUByte: FfiConverterRustBuffer<List<List<kotlin.UByte>>> {
+    override fun read(buf: ByteBuffer): List<List<kotlin.UByte>> {
+        val len = buf.getInt()
+        return List<List<kotlin.UByte>>(len) {
+            FfiConverterSequenceUByte.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<List<kotlin.UByte>>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterSequenceUByte.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<List<kotlin.UByte>>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterSequenceUByte.write(it, buf)
+        }
     }
 }
 
