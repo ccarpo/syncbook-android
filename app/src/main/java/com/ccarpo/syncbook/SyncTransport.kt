@@ -26,7 +26,7 @@ class SyncTransport(
     }
 
     private var socket: WebSocket? = null
-    private var sentStateVector: List<UByte> = emptyList()
+    private var sentStateVector = ByteArray(0)
     private var observing = false
     private var applyingRemoteMessage = false
 
@@ -35,7 +35,7 @@ class SyncTransport(
             if (applyingRemoteMessage) return
             val update = doc.encodeStateAsUpdate(sentStateVector)
             if (update.isNotEmpty()) {
-                socket?.send(ByteString.of(*doc.encodeUpdateMessage(update).toByteArray()))
+                socket?.send(doc.encodeUpdateMessage(update).toByteString())
                 sentStateVector = doc.stateVector()
             }
         }
@@ -70,16 +70,16 @@ class SyncTransport(
         override fun onOpen(webSocket: WebSocket, response: Response) {
             socket = webSocket
             sentStateVector = doc.stateVector()
-            webSocket.send(ByteString.of(*doc.syncStep1().toByteArray()))
+            webSocket.send(doc.syncStep1().toByteString())
             onStatus(Status.CONNECTED)
         }
 
         override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
             applyingRemoteMessage = true
             try {
-                val replies = doc.handleMessage(bytes.toByteArray().map { it.toUByte() })
+                val replies = doc.handleMessage(bytes.toByteArray())
                 replies.forEach { reply ->
-                    webSocket.send(ByteString.of(*reply.toByteArray()))
+                    webSocket.send(reply.toByteString())
                 }
             } finally {
                 applyingRemoteMessage = false
@@ -99,5 +99,4 @@ class SyncTransport(
     }
 }
 
-private fun List<UByte>.toByteArray(): ByteArray =
-    map { it.toByte() }.toByteArray()
+private fun ByteArray.toByteString(): ByteString = ByteString.of(*this)

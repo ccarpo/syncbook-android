@@ -9,13 +9,13 @@ class NotePersistence(context: Context) {
     fun load(noteId: String, doc: SyncDoc) {
         val file = directory.resolve("$noteId.yrs")
         if (file.exists()) {
-            doc.applyUpdate(file.readBytes().map { it.toUByte() })
+            doc.applyUpdate(file.readBytes())
         }
     }
 
     fun save(noteId: String, doc: SyncDoc) {
         directory.resolve("$noteId.yrs").writeBytes(
-            doc.encodeStateAsUpdate(null).map { it.toByte() }.toByteArray(),
+            doc.encodeStateAsUpdate(null),
         )
     }
 }

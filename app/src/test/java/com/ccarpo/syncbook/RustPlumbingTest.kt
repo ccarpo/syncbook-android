@@ -1,14 +1,15 @@
 package com.ccarpo.syncbook
 
 import org.junit.Test
-import uniffi.syncbook.Greeting
+import uniffi.syncbook.SyncDoc
 import kotlin.test.assertEquals
 
 class RustPlumbingTest {
     @Test
-    fun greetingCrossesTheUniFfiBoundary() {
-        Greeting().use { greeting ->
-            assertEquals("Hello, JVM from Rust", greeting.hello("JVM"))
+    fun syncDocCrossesTheUniFfiBoundary() {
+        SyncDoc().use { doc ->
+            doc.insertText("", 0u, "plumbing")
+            assertEquals("plumbing", doc.blocks().single().text)
         }
     }
 }

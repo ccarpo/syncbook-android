@@ -79,6 +79,53 @@ class SyncDocTest {
         }
     }
 
+    @Test
+    fun firstCharacterBootstrapsAnEmptyNote() {
+        SyncDoc().use { doc ->
+            doc.insertText("", 0u, "A")
+            assertEquals("A", doc.blocks().single().text)
+        }
+    }
+
+    @Test
+    fun utf16OffsetsHandleUmlautsAndEmoji() {
+        SyncDoc().use { doc ->
+            doc.insertText("", 0u, "ä😀")
+            val id = doc.blocks().single().id
+            doc.insertText(id, 1u, "x")
+            assertEquals("äx😀", doc.blocks().single().text)
+            doc.deleteText(id, 2u, 2u)
+            assertEquals("äx", doc.blocks().single().text)
+        }
+    }
+
+    @Test
+    fun splitKeepsOrderAndUtf16Offset() {
+        SyncDoc().use { doc ->
+            doc.insertText("", 0u, "ä😀tail")
+            val id = doc.blocks().single().id
+            doc.splitBlock(id, 3u)
+            assertEquals(listOf("ä😀", "tail"), doc.blocks().map { it.text })
+        }
+    }
+
+    @Test
+    fun taskItemsUseNestedParagraphShape() {
+        SyncDoc().use { doc ->
+            doc.insertText("", 0u, "task")
+            doc.toggleTaskList(doc.blocks().single().id)
+            assertEquals(BlockKind.TASK_ITEM, doc.blocks().single().kind)
+            assertEquals("task", doc.blocks().single().text)
+        }
+    }
+
+    @Test
+    fun malformedNetworkDataDoesNotCrossFfiAsPanic() {
+        SyncDoc().use { doc ->
+            doc.applyUpdate(byteArrayOf(0x7f, 0x00, 0x01))
+            assertEquals(emptyList(), doc.handleMessage(byteArrayOf(0x01, 0x7f)))
+        }
+    }
     private fun exchangeSync(left: SyncDoc, right: SyncDoc) {
         for (reply in right.handleMessage(syncStep1(left))) {
             left.handleMessage(reply)
@@ -95,22 +142,5 @@ class SyncDocTest {
         left.applyUpdate(rightUpdate)
     }
 
-    private fun syncStep1(doc: SyncDoc): List<UByte> {
-        val vector = doc.stateVector()
-        return listOf(0u.toUByte(), 0u.toUByte()) + varUint(vector.size) + vector
-    }
-
-    private fun varUint(value: Int): List<UByte> {
-        var remaining = value
-        val encoded = mutableListOf<UByte>()
-        do {
-            var byte = remaining and 0x7f
-            remaining = remaining ushr 7
-            if (remaining != 0) {
-                byte = byte or 0x80
-            }
-            encoded += byte.toUByte()
-        } while (remaining != 0)
-        return encoded
-    }
+    private fun syncStep1(doc: SyncDoc): ByteArray = doc.syncStep1()
 }

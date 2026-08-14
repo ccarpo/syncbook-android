@@ -1,6 +1,7 @@
 use std::sync::Mutex;
 
 use yrs::{
+    doc::{OffsetKind, Options},
     encoding::read::Cursor,
     sync::{
         protocol::{Message, SyncMessage},
@@ -18,8 +19,6 @@ pub trait SyncDocObserver: Send + Sync {
 
 uniffi::include_scaffolding!("syncbook");
 
-pub struct Greeting;
-
 pub enum BlockKind {
     Paragraph,
     TaskItem,
@@ -32,16 +31,6 @@ pub struct Block {
     pub checked: bool,
 }
 
-impl Greeting {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn hello(&self, name: String) -> String {
-        format!("Hello, {name} from Rust")
-    }
-}
-
 pub struct SyncDoc {
     doc: Mutex<yrs::Doc>,
     observers: Mutex<Vec<Box<dyn SyncDocObserver>>>,
@@ -50,24 +39,31 @@ pub struct SyncDoc {
 impl SyncDoc {
     pub fn new() -> Self {
         Self {
-            doc: Mutex::new(yrs::Doc::new()),
+            doc: Mutex::new(yrs::Doc::with_options(Options {
+                offset_kind: OffsetKind::Utf16,
+                ..Options::default()
+            })),
             observers: Mutex::new(Vec::new()),
         }
     }
 
     pub fn apply_update(&self, update: Vec<u8>) {
-        let update = Update::decode_v1(&update).expect("invalid Yrs update");
-        self.doc
-            .lock()
-            .unwrap()
-            .transact_mut()
-            .apply_update(update)
-            .expect("failed to apply update");
+        let Ok(update) = Update::decode_v1(&update) else {
+            return;
+        };
+        let Ok(()) = self.doc.lock().unwrap().transact_mut().apply_update(update) else {
+            return;
+        };
         self.notify_observers();
     }
 
     pub fn state_vector(&self) -> Vec<u8> {
-        self.doc.lock().unwrap().transact().state_vector().encode_v1()
+        self.doc
+            .lock()
+            .unwrap()
+            .transact()
+            .state_vector()
+            .encode_v1()
     }
 
     pub fn sync_step1(&self) -> Vec<u8> {
@@ -86,7 +82,7 @@ impl SyncDoc {
     pub fn encode_state_as_update(&self, state_vector: Option<Vec<u8>>) -> Vec<u8> {
         let doc = self.doc.lock().unwrap();
         let vector = state_vector
-            .map(|bytes| yrs::StateVector::decode_v1(&bytes).expect("invalid state vector"))
+            .and_then(|bytes| yrs::StateVector::decode_v1(&bytes).ok())
             .unwrap_or_default();
         let update = doc.transact().encode_state_as_update_v1(&vector);
         update
@@ -107,9 +103,11 @@ impl SyncDoc {
                 }
                 Message::Sync(SyncMessage::SyncStep2(update))
                 | Message::Sync(SyncMessage::Update(update)) => {
-                    let update = Update::decode_v1(&update).expect("invalid Yrs update");
-                    doc.transact_mut().apply_update(update).expect("failed to apply update");
-                    changed = true;
+                    if let Ok(update) = Update::decode_v1(&update) {
+                        if doc.transact_mut().apply_update(update).is_ok() {
+                            changed = true;
+                        }
+                    }
                     None
                 }
                 Message::Awareness(_) | Message::AwarenessQuery => None,
@@ -144,12 +142,21 @@ impl SyncDoc {
             let element = root.push_back(&mut txn, XmlElementPrelim::empty("paragraph"));
             element.push_back(&mut txn, XmlTextPrelim::new(""));
         }
-        self.with_text(&block_id, |txn, node| node.insert(txn, offset, &text));
+        let target_id = if block_id.is_empty() {
+            self.blocks().first().map(|block| block.id.clone())
+        } else {
+            Some(block_id)
+        };
+        if let Some(target_id) = target_id {
+            self.with_text(&target_id, |txn, node| node.insert(txn, offset, &text));
+        }
         self.notify_observers();
     }
 
     pub fn delete_text(&self, block_id: String, offset: u32, length: u32) {
-        self.with_text(&block_id, |txn, node| node.remove_range(txn, offset, length));
+        self.with_text(&block_id, |txn, node| {
+            node.remove_range(txn, offset, length)
+        });
         self.notify_observers();
     }
 
@@ -172,13 +179,38 @@ impl SyncDoc {
                 return;
             };
             let text = element_text(&current, txn);
-            let (left, right) = text.split_at(offset as usize);
+            let (left, right) = split_utf16(&text, offset);
             current.remove_range(txn, 0, current.len(txn));
-            current.push_back(txn, XmlTextPrelim::new(left));
-            if let Some(parent) = current.parent().and_then(XmlOut::into_xml_fragment) {
+            append_block_text(&current, txn, left);
+            if let Some(parent) = current.parent() {
                 let tag = current.tag().to_string();
-                let inserted = parent.insert(txn, parent.len(txn), XmlElementPrelim::empty(tag));
-                inserted.push_back(txn, XmlTextPrelim::new(right));
+                match parent {
+                    XmlOut::Fragment(parent) => {
+                        let index = fragment_element_index(&parent, txn, &block_id);
+                        let inserted = parent.insert(txn, index + 1, XmlElementPrelim::empty(tag));
+                        if current.tag().as_ref() == "taskItem" {
+                            let checked = current
+                                .get_attribute(txn, "checked")
+                                .map(|value| value.to_string(txn))
+                                .unwrap_or_else(|| "false".to_string());
+                            inserted.insert_attribute(txn, "checked", checked);
+                        }
+                        append_block_text(&inserted, txn, right);
+                    }
+                    XmlOut::Element(parent) => {
+                        let index = element_element_index(&parent, txn, &block_id);
+                        let inserted = parent.insert(txn, index + 1, XmlElementPrelim::empty(tag));
+                        if current.tag().as_ref() == "taskItem" {
+                            let checked = current
+                                .get_attribute(txn, "checked")
+                                .map(|value| value.to_string(txn))
+                                .unwrap_or_else(|| "false".to_string());
+                            inserted.insert_attribute(txn, "checked", checked);
+                        }
+                        append_block_text(&inserted, txn, right);
+                    }
+                    XmlOut::Text(_) => {}
+                }
             }
         }
         self.notify_observers();
@@ -205,17 +237,17 @@ impl SyncDoc {
                 let list = parent.insert(txn, index, XmlElementPrelim::empty("taskList"));
                 let item = list.push_back(txn, XmlElementPrelim::empty("taskItem"));
                 item.insert_attribute(txn, "checked", "false");
-                item.push_back(txn, XmlTextPrelim::new(text));
+                let paragraph = item.push_back(txn, XmlElementPrelim::empty("paragraph"));
+                paragraph.push_back(txn, XmlTextPrelim::new(text));
             } else if element.tag().as_ref() == "taskItem" {
                 let text = element_text(&element, txn);
-                let Some(parent) = element.parent().and_then(XmlOut::into_xml_fragment) else {
+                let Some(list) = element.parent().and_then(XmlOut::into_xml_element) else {
                     return;
                 };
-                let index = parent
-                    .successors(txn)
-                    .position(|node| matches!(&node, XmlOut::Element(candidate) if element_id(candidate) == block_id))
-                    .map(|index| index as u32)
-                    .unwrap_or(parent.len(txn));
+                let Some(parent) = list.parent().and_then(XmlOut::into_xml_fragment) else {
+                    return;
+                };
+                let index = fragment_element_index(&parent, txn, &element_id(&list));
                 parent.remove_range(txn, index, 1);
                 let paragraph = parent.insert(txn, index, XmlElementPrelim::empty("paragraph"));
                 paragraph.push_back(txn, XmlTextPrelim::new(text));
@@ -226,6 +258,10 @@ impl SyncDoc {
 
     pub fn observe(&self, observer: Box<dyn SyncDocObserver>) {
         self.observers.lock().unwrap().push(observer);
+    }
+
+    pub fn clear_observers(&self) {
+        self.observers.lock().unwrap().clear();
     }
 
     fn notify_observers(&self) {
@@ -251,21 +287,51 @@ impl SyncDoc {
     }
 }
 
-fn find_element<'a>(
-    txn: &'a yrs::TransactionMut<'a>,
-    id: &str,
-) -> Option<yrs::XmlElementRef> {
-    let root = txn.get_xml_fragment("prosemirror")?;
-    root.successors(txn).find_map(|node| match node {
-        XmlOut::Element(element) if element_id(&element) == id => Some(element),
-        _ => None,
-    })
+impl Default for SyncDoc {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
-fn top_level_blocks<T: yrs::ReadTxn>(
-    root: &yrs::XmlFragmentRef,
+fn find_element<'a>(txn: &'a yrs::TransactionMut<'a>, id: &str) -> Option<yrs::XmlElementRef> {
+    let root = txn.get_xml_fragment("prosemirror")?;
+    find_in_fragment(&root, txn, id)
+}
+
+fn find_in_fragment<T: yrs::ReadTxn>(
+    fragment: &yrs::XmlFragmentRef,
     txn: &T,
-) -> Vec<Block> {
+    id: &str,
+) -> Option<yrs::XmlElementRef> {
+    for index in 0..fragment.len(txn) {
+        if let Some(XmlOut::Element(element)) = fragment.get(txn, index) {
+            if let Some(found) = find_in_element(&element, txn, id) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn find_in_element<T: yrs::ReadTxn>(
+    element: &yrs::XmlElementRef,
+    txn: &T,
+    id: &str,
+) -> Option<yrs::XmlElementRef> {
+    if element_id(element) == id {
+        return Some(element.clone());
+    }
+    for index in 0..element.len(txn) {
+        if let Some(XmlOut::Element(child)) = element.get(txn, index) {
+            if let Some(found) = find_in_element(&child, txn, id) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn top_level_blocks<T: yrs::ReadTxn>(root: &yrs::XmlFragmentRef, txn: &T) -> Vec<Block> {
     let mut blocks = Vec::new();
     for index in 0..root.len(txn) {
         let Some(XmlOut::Element(element)) = root.get(txn, index) else {
@@ -294,13 +360,49 @@ fn top_level_blocks<T: yrs::ReadTxn>(
 }
 
 fn element_text<T: yrs::ReadTxn>(element: &yrs::XmlElementRef, txn: &T) -> String {
-    element
-        .successors(txn)
-        .filter_map(|node| match node {
-            XmlOut::Text(text) => Some(text.get_string(txn)),
+    (0..element.len(txn))
+        .filter_map(|index| match element.get(txn, index) {
+            Some(XmlOut::Text(text)) => Some(text.get_string(txn)),
+            Some(XmlOut::Element(child)) => Some(element_text(&child, txn)),
             _ => None,
         })
         .collect()
+}
+
+fn fragment_element_index<T: yrs::ReadTxn>(parent: &yrs::XmlFragmentRef, txn: &T, id: &str) -> u32 {
+    parent
+        .successors(txn)
+        .position(|node| matches!(&node, XmlOut::Element(candidate) if element_id(candidate) == id))
+        .map(|index| index as u32)
+        .unwrap_or(parent.len(txn))
+}
+
+fn element_element_index<T: yrs::ReadTxn>(parent: &yrs::XmlElementRef, txn: &T, id: &str) -> u32 {
+    parent
+        .successors(txn)
+        .position(|node| matches!(&node, XmlOut::Element(candidate) if element_id(candidate) == id))
+        .map(|index| index as u32)
+        .unwrap_or(parent.len(txn))
+}
+
+fn append_block_text(element: &yrs::XmlElementRef, txn: &mut yrs::TransactionMut<'_>, text: &str) {
+    if element.tag().as_ref() == "taskItem" {
+        let paragraph = element.push_back(txn, XmlElementPrelim::empty("paragraph"));
+        paragraph.push_back(txn, XmlTextPrelim::new(text));
+    } else {
+        element.push_back(txn, XmlTextPrelim::new(text));
+    }
+}
+
+fn split_utf16(text: &str, offset: u32) -> (&str, &str) {
+    let mut units = 0;
+    for (index, character) in text.char_indices() {
+        if units >= offset {
+            return text.split_at(index);
+        }
+        units += character.len_utf16() as u32;
+    }
+    (text, "")
 }
 
 fn task_block<T: yrs::ReadTxn>(item: &yrs::XmlElementRef, txn: &T) -> Block {
@@ -367,6 +469,25 @@ mod tests {
         let right_id = right.blocks()[0].id.clone();
         left.insert_text(left_id, 0, "left".to_string());
         right.insert_text(right_id, 0, "right".to_string());
+
+        sync_pair(&left, &right);
+
+        let text = &left.blocks()[0].text;
+        assert!(text.contains("left"));
+        assert!(text.contains("right"));
+        assert_eq!(text, &right.blocks()[0].text);
+    }
+
+    #[test]
+    fn concurrent_utf16_same_offset_inserts_both_survive() {
+        let left = SyncDoc::new();
+        let right = SyncDoc::new();
+        left.insert_text(String::new(), 0, "ä😀".to_string());
+        sync_pair(&left, &right);
+        let left_id = left.blocks()[0].id.clone();
+        let right_id = right.blocks()[0].id.clone();
+        left.insert_text(left_id, 1, "left".to_string());
+        right.insert_text(right_id, 1, "right".to_string());
 
         sync_pair(&left, &right);
 

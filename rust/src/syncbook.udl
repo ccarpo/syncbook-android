@@ -16,19 +16,14 @@ callback interface SyncDocObserver {
     void changed();
 };
 
-interface Greeting {
-    constructor();
-    string hello(string name);
-};
-
 interface SyncDoc {
     constructor();
-    void apply_update(sequence<u8> update);
-    sequence<u8> state_vector();
-    sequence<u8> sync_step1();
-    sequence<u8> encode_update_message(sequence<u8> update);
-    sequence<u8> encode_state_as_update(sequence<u8>? state_vector);
-    sequence<sequence<u8>> handle_message(sequence<u8> message);
+    void apply_update(bytes update);
+    bytes state_vector();
+    bytes sync_step1();
+    bytes encode_update_message(bytes update);
+    bytes encode_state_as_update(bytes? state_vector);
+    sequence<bytes> handle_message(bytes message);
     sequence<Block> blocks();
     void insert_text(string block_id, u32 offset, string text);
     void delete_text(string block_id, u32 offset, u32 length);
@@ -36,4 +31,5 @@ interface SyncDoc {
     void split_block(string block_id, u32 offset);
     void toggle_task_list(string block_id);
     void observe(SyncDocObserver observer);
+    void clear_observers();
 };
