@@ -705,6 +705,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_syncbook_checksum_method_syncdoc_encode_state_as_update(
     ): Int
+    external fun uniffi_syncbook_checksum_method_syncdoc_encode_update_message(
+    ): Int
     external fun uniffi_syncbook_checksum_method_syncdoc_handle_message(
     ): Int
     external fun uniffi_syncbook_checksum_method_syncdoc_insert_text(
@@ -716,6 +718,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_syncbook_checksum_method_syncdoc_split_block(
     ): Int
     external fun uniffi_syncbook_checksum_method_syncdoc_state_vector(
+    ): Int
+    external fun uniffi_syncbook_checksum_method_syncdoc_sync_step1(
     ): Int
     external fun uniffi_syncbook_checksum_method_syncdoc_toggle_task_list(
     ): Int
@@ -766,6 +770,8 @@ internal object UniffiLib {
     ): Unit
     external fun uniffi_syncbook_fn_method_syncdoc_encode_state_as_update(`ptr`: Long,`stateVector`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_syncbook_fn_method_syncdoc_encode_update_message(`ptr`: Long,`update`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_syncbook_fn_method_syncdoc_handle_message(`ptr`: Long,`message`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_syncbook_fn_method_syncdoc_insert_text(`ptr`: Long,`blockId`: RustBuffer.ByValue,`offset`: Int,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -777,6 +783,8 @@ internal object UniffiLib {
     external fun uniffi_syncbook_fn_method_syncdoc_split_block(`ptr`: Long,`blockId`: RustBuffer.ByValue,`offset`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_syncbook_fn_method_syncdoc_state_vector(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_syncbook_fn_method_syncdoc_sync_step1(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_syncbook_fn_method_syncdoc_toggle_task_list(`ptr`: Long,`blockId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -916,6 +924,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_syncbook_checksum_method_syncdoc_encode_state_as_update() != 64145) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_syncbook_checksum_method_syncdoc_encode_update_message() != 12314) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_syncbook_checksum_method_syncdoc_handle_message() != 59106) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -932,6 +943,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_syncbook_checksum_method_syncdoc_state_vector() != 32552) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_syncbook_checksum_method_syncdoc_sync_step1() != 18328) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_syncbook_checksum_method_syncdoc_toggle_task_list() != 34489) {
@@ -1634,6 +1648,8 @@ public interface SyncDocInterface {
     
     fun `encodeStateAsUpdate`(`stateVector`: List<kotlin.UByte>?): List<kotlin.UByte>
     
+    fun `encodeUpdateMessage`(`update`: List<kotlin.UByte>): List<kotlin.UByte>
+    
     fun `handleMessage`(`message`: List<kotlin.UByte>): List<List<kotlin.UByte>>
     
     fun `insertText`(`blockId`: kotlin.String, `offset`: kotlin.UInt, `text`: kotlin.String)
@@ -1645,6 +1661,8 @@ public interface SyncDocInterface {
     fun `splitBlock`(`blockId`: kotlin.String, `offset`: kotlin.UInt)
     
     fun `stateVector`(): List<kotlin.UByte>
+    
+    fun `syncStep1`(): List<kotlin.UByte>
     
     fun `toggleTaskList`(`blockId`: kotlin.String)
     
@@ -1815,6 +1833,20 @@ open class SyncDoc: Disposable, AutoCloseable, SyncDocInterface
     }
     
 
+    override fun `encodeUpdateMessage`(`update`: List<kotlin.UByte>): List<kotlin.UByte> {
+            return FfiConverterSequenceUByte.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_syncbook_fn_method_syncdoc_encode_update_message(
+        it,
+        
+        FfiConverterSequenceUByte.lower(`update`),_status)
+}
+    }
+    )
+    }
+    
+
     override fun `handleMessage`(`message`: List<kotlin.UByte>): List<List<kotlin.UByte>> {
             return FfiConverterSequenceSequenceUByte.lift(
     callWithHandle {
@@ -1890,6 +1922,19 @@ open class SyncDoc: Disposable, AutoCloseable, SyncDocInterface
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_syncbook_fn_method_syncdoc_state_vector(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `syncStep1`(): List<kotlin.UByte> {
+            return FfiConverterSequenceUByte.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_syncbook_fn_method_syncdoc_sync_step1(
         it,
         _status)
 }

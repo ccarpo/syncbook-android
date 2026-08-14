@@ -25,6 +25,8 @@ interface SyncDoc {
     constructor();
     void apply_update(sequence<u8> update);
     sequence<u8> state_vector();
+    sequence<u8> sync_step1();
+    sequence<u8> encode_update_message(sequence<u8> update);
     sequence<u8> encode_state_as_update(sequence<u8>? state_vector);
     sequence<sequence<u8>> handle_message(sequence<u8> message);
     sequence<Block> blocks();

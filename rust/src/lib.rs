@@ -70,6 +70,19 @@ impl SyncDoc {
         self.doc.lock().unwrap().transact().state_vector().encode_v1()
     }
 
+    pub fn sync_step1(&self) -> Vec<u8> {
+        let vector = self.doc.lock().unwrap().transact().state_vector();
+        let mut encoder = EncoderV1::new();
+        Message::Sync(SyncMessage::SyncStep1(vector)).encode(&mut encoder);
+        encoder.to_vec()
+    }
+
+    pub fn encode_update_message(&self, update: Vec<u8>) -> Vec<u8> {
+        let mut encoder = EncoderV1::new();
+        Message::Sync(SyncMessage::Update(update)).encode(&mut encoder);
+        encoder.to_vec()
+    }
+
     pub fn encode_state_as_update(&self, state_vector: Option<Vec<u8>>) -> Vec<u8> {
         let doc = self.doc.lock().unwrap();
         let vector = state_vector
