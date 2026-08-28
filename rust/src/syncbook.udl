@@ -1,0 +1,35 @@
+namespace syncbook {};
+
+enum BlockKind {
+    "Paragraph",
+    "TaskItem",
+};
+
+dictionary Block {
+    string id;
+    BlockKind kind;
+    string text;
+    boolean checked;
+};
+
+callback interface SyncDocObserver {
+    void changed();
+};
+
+interface SyncDoc {
+    constructor();
+    void apply_update(bytes update);
+    bytes state_vector();
+    bytes sync_step1();
+    bytes encode_update_message(bytes update);
+    bytes encode_state_as_update(bytes? state_vector);
+    sequence<bytes> handle_message(bytes message);
+    sequence<Block> blocks();
+    void insert_text(string block_id, u32 offset, string text);
+    void delete_text(string block_id, u32 offset, u32 length);
+    void set_checked(string block_id, boolean checked);
+    void split_block(string block_id, u32 offset);
+    void toggle_task_list(string block_id);
+    void observe(SyncDocObserver observer);
+    void clear_observers();
+};

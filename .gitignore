@@ -1,0 +1,19 @@
+# Gradle
+.gradle/
+build/
+**/build/
+
+# Android generated output
+**/jniLibs/
+*.apk
+*.aab
+*.class
+
+# Rust generated output
+rust/target/
+**/target/
+
+# Local IDE files
+.idea/
+*.iml
+local.properties

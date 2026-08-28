@@ -1,0 +1,15 @@
+[package]
+name = "syncbook"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "uniffi_syncbook"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+uniffi = { version = "0.32.0", features = ["build", "cli"] }
+yrs = "0.27.3"
+
+[build-dependencies]
+uniffi_build = "0.32.0"
