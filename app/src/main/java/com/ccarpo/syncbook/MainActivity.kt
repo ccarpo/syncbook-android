@@ -17,12 +17,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -34,6 +36,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -43,6 +46,9 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import uniffi.syncbook.SyncDoc
@@ -94,6 +100,18 @@ private class LocalEditGuard {
     var applying = false
 }
 
+private fun normalizedTags(text: String): List<String> =
+    text.split(',').map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+
+private fun replaceTagToken(text: String, tag: String): String {
+    val comma = text.lastIndexOf(',')
+    return if (comma < 0) {
+        "$tag, "
+    } else {
+        text.substring(0, comma + 1).trimEnd() + " $tag, "
+    }
+}
+
 @Composable
 private fun NotesScreen(
     client: OkHttpClient,
@@ -125,9 +143,18 @@ private fun NotesScreen(
         onDispose { events.close() }
     }
 
+    val allTags = notes.flatMap { it.tags }.distinct().sorted()
     BackHandler(enabled = selected != null) { selected = null }
     selected?.let { note ->
-        EditorScreen(client, token, baseUrl, context, note, onLogout) { selected = null }
+        EditorScreen(
+            client = client,
+            token = token,
+            baseUrl = baseUrl,
+            context = context,
+            note = note,
+            allTags = allTags,
+            onUnauthorized = onLogout,
+        ) { selected = null }
         return
     }
 
@@ -211,6 +238,7 @@ private fun EditorScreen(
     baseUrl: String,
     context: Context,
     note: Note,
+    allTags: List<String>,
     onUnauthorized: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -224,10 +252,13 @@ private fun EditorScreen(
     val localEdit = remember(note.id) { LocalEditGuard() }
     val api = remember(baseUrl) { ApiClient(client, baseUrl) }
     val scope = rememberCoroutineScope()
+    val tagSaveScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
     var historyVisible by remember { mutableStateOf(false) }
     var snapshots by remember { mutableStateOf<List<Snapshot>>(emptyList()) }
     var preview by remember { mutableStateOf<String?>(null) }
     var tags by remember(note.id) { mutableStateOf(note.tags.joinToString(", ")) }
+    var lastSavedTags by remember(note.id) { mutableStateOf(note.tags) }
+    var tagsFocused by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
@@ -276,42 +307,23 @@ private fun EditorScreen(
 
     fun toggleChecklist() {
         val value = valueState.value
-        val text = value.text
-        val cursor = value.selection.start.coerceIn(0, text.length)
-        val lineStart = text.lastIndexOf('\n', (cursor - 1).coerceAtLeast(0)) + 1
-        val line = lineAt(text, cursor)
-        val prefixLength = when {
-            line.startsWith("- [ ] ") || line.startsWith("- [x] ") || line.startsWith("- [X] ") -> 6
-            line == "- [ ]" || line == "- [x]" || line == "- [X]" -> 5
-            else -> 0
-        }
-        if (prefixLength > 0) {
-            applyMarkdown(
-                value.copy(
-                    text = text.removeRange(lineStart, lineStart + prefixLength),
-                    selection = TextRange(
-                        (value.selection.start - prefixLength).coerceAtLeast(0),
-                        (value.selection.end - prefixLength).coerceAtLeast(0),
-                    ),
-                ),
-            )
-        } else {
-            applyMarkdown(
-                value.copy(
-                    text = text.substring(0, lineStart) + "- [ ] " + text.substring(lineStart),
-                    selection = TextRange(
-                        value.selection.start + 6,
-                        value.selection.end + 6,
-                    ),
-                ),
-            )
-        }
+        applyMarkdown(toggleChecklistLine(value.text, value.selection))
     }
 
-    fun toggleChecked() {
-        val value = valueState.value
-        toggleCheckedLine(value.text, value.selection.start)?.let { text ->
-            applyMarkdown(value.copy(text = text))
+    fun saveTagsIfNeeded(launchScope: CoroutineScope, updateUi: Boolean) {
+        val desired = normalizedTags(tags)
+        if (desired == lastSavedTags) return
+        launchScope.launch {
+            runCatching { api.setTags(token, note.id, desired) }
+                .onSuccess { saved ->
+                    if (updateUi) {
+                        lastSavedTags = saved
+                        tags = saved.joinToString(", ")
+                    }
+                }
+                .onFailure {
+                    if (updateUi) error = it.message
+                }
         }
     }
 
@@ -342,6 +354,7 @@ private fun EditorScreen(
         )
         transport.connect()
         onDispose {
+            saveTagsIfNeeded(tagSaveScope, updateUi = false)
             transport.close()
             doc.clearObservers()
             persistence.save(note.id, doc)
@@ -368,36 +381,40 @@ private fun EditorScreen(
                 if (!historyVisible) preview = null
             }) { Text(if (historyVisible) "Editor" else "History") }
             OutlinedButton(onClick = ::toggleChecklist) { Text("Checklist") }
-            OutlinedButton(onClick = ::toggleChecked) {
-                val current = valueState.value
-                val cursor = current.selection.start
-                Text(if (isCheckedLine(lineAt(current.text, cursor))) "Undone" else "Done")
-            }
         }
-        Row(
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             OutlinedTextField(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.fillMaxWidth().onFocusChanged {
+                    tagsFocused = it.isFocused
+                    if (!it.isFocused) saveTagsIfNeeded(scope, updateUi = true)
+                },
                 value = tags,
                 onValueChange = { tags = it },
                 label = { Text("Tags (comma separated)") },
                 singleLine = true,
             )
-            OutlinedButton(onClick = {
-                scope.launch {
-                    runCatching {
-                        api.setTags(
-                            token,
-                            note.id,
-                            tags.split(',').map { it.trim() }.filter { it.isNotEmpty() },
+            val usedTags = normalizedTags(tags)
+            val tokenBeingTyped = tags.substringAfterLast(',').trim()
+            val suggestions = if (tagsFocused) {
+                allTags.filter { tag ->
+                    tag !in usedTags && tag.startsWith(tokenBeingTyped, ignoreCase = true)
+                }.take(10)
+            } else {
+                emptyList()
+            }
+            if (suggestions.isNotEmpty()) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    items(suggestions) { tag ->
+                        SuggestionChip(
+                            onClick = { tags = replaceTagToken(tags, tag) },
+                            label = { Text(tag) },
                         )
                     }
-                        .onSuccess { tags = it.joinToString(", ") }
-                        .onFailure { error = it.message }
                 }
-            }) { Text("Save tags") }
+            }
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (historyVisible) {

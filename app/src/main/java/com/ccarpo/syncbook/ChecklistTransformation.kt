@@ -5,6 +5,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 
@@ -154,6 +155,32 @@ internal fun toggleCheckedLine(text: String, cursor: Int): String? {
     return text.substring(0, lineStart) + replacement + text.substring(lineStart + replacement.length)
 }
 
+internal fun toggleChecklistLine(text: String, selection: TextRange): TextFieldValue {
+    val safeStart = selection.start.coerceIn(0, text.length)
+    val safeEnd = selection.end.coerceIn(0, text.length)
+    val lineStart = lineStartAt(text, safeStart)
+    val line = lineAt(text, safeStart)
+    val prefixLength = checklistPrefixLength(line)
+    val newText: String
+    val newStart: Int
+    val newEnd: Int
+    if (prefixLength > 0) {
+        newText = text.removeRange(lineStart, lineStart + prefixLength)
+        newStart = removePrefixOffset(safeStart, lineStart, prefixLength)
+        newEnd = removePrefixOffset(safeEnd, lineStart, prefixLength)
+    } else {
+        newText = text.substring(0, lineStart) + "- [ ] " + text.substring(lineStart)
+        newStart = addPrefixOffset(safeStart, lineStart, 6)
+        newEnd = addPrefixOffset(safeEnd, lineStart, 6)
+    }
+    val clampedStart = newStart.coerceIn(0, newText.length)
+    val clampedEnd = newEnd.coerceIn(clampedStart, newText.length)
+    return TextFieldValue(
+        text = newText,
+        selection = TextRange(clampedStart, clampedEnd),
+    )
+}
+
 internal fun lineAt(text: String, offset: Int): String {
     val lineStart = lineStartAt(text, offset)
     val lineEnd = text.indexOf('\n', lineStart).let { if (it < 0) text.length else it }
@@ -165,6 +192,27 @@ internal fun isCheckedLine(line: String): Boolean =
         line.startsWith("- [X] ") ||
         line == "- [x]" ||
         line == "- [X]"
+
+private fun checklistPrefixLength(line: String): Int =
+    when {
+        line.startsWith("- [ ] ") ||
+            line.startsWith("- [x] ") ||
+            line.startsWith("- [X] ") -> 6
+        line == "- [ ]" ||
+            line == "- [x]" ||
+            line == "- [X]" -> 5
+        else -> 0
+    }
+
+private fun addPrefixOffset(offset: Int, lineStart: Int, prefixLength: Int): Int =
+    if (offset >= lineStart) offset + prefixLength else offset
+
+private fun removePrefixOffset(offset: Int, lineStart: Int, prefixLength: Int): Int =
+    when {
+        offset <= lineStart -> offset
+        offset <= lineStart + prefixLength -> lineStart
+        else -> offset - prefixLength
+    }
 
 private fun lineStartAt(text: String, offset: Int): Int {
     val position = offset.coerceIn(0, text.length)

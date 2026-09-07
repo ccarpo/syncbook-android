@@ -1,6 +1,7 @@
 package com.ccarpo.syncbook
 
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextRange
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -69,5 +70,29 @@ class ChecklistTransformationTest {
         )
 
         assertEquals("☑ done", transformed.text.text)
+    }
+
+    @Test
+    fun toggleChecklistLineAddsPrefixAndShiftsSelection() {
+        val result = toggleChecklistLine("plain", TextRange(2))
+
+        assertEquals("- [ ] plain", result.text)
+        assertEquals(TextRange(8), result.selection)
+    }
+
+    @Test
+    fun toggleChecklistLineRemovesPrefixAndClampsSelection() {
+        val result = toggleChecklistLine("first\n- [ ] item", TextRange(13))
+
+        assertEquals("first\nitem", result.text)
+        assertEquals(TextRange(7), result.selection)
+    }
+
+    @Test
+    fun toggleChecklistLineClampsSelectionAfterInsertion() {
+        val result = toggleChecklistLine("x", TextRange(10, 12))
+
+        assertEquals("- [ ] x", result.text)
+        assertEquals(TextRange(7), result.selection)
     }
 }
