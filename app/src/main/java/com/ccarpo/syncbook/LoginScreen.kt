@@ -23,8 +23,13 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
 @Composable
-fun LoginScreen(baseUrl: String, onAuthenticated: (String) -> Unit) {
+fun LoginScreen(
+    baseUrl: String,
+    onBaseUrlChanged: (String) -> Unit,
+    onAuthenticated: (String) -> Unit,
+) {
     val scope = rememberCoroutineScope()
+    var serverUrl by remember(baseUrl) { mutableStateOf(baseUrl) }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var registering by remember { mutableStateOf(false) }
@@ -34,6 +39,13 @@ fun LoginScreen(baseUrl: String, onAuthenticated: (String) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("Syncbook", style = MaterialTheme.typography.headlineMedium)
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = serverUrl,
+            onValueChange = { serverUrl = it },
+            label = { Text("Server base URL") },
+            singleLine = true,
+        )
         OutlinedTextField(email, { email = it }, label = { Text("Email") })
         OutlinedTextField(
             password,
@@ -46,7 +58,9 @@ fun LoginScreen(baseUrl: String, onAuthenticated: (String) -> Unit) {
             onClick = {
                 scope.launch {
                     runCatching {
-                        val api = ApiClient(OkHttpClient(), baseUrl)
+                        val url = serverUrl.trim().trimEnd('/')
+                        onBaseUrlChanged(url)
+                        val api = ApiClient(OkHttpClient(), url)
                         if (registering) api.register(email, password) else api.login(email, password)
                     }.onSuccess(onAuthenticated).onFailure { error = it.message }
                 }
