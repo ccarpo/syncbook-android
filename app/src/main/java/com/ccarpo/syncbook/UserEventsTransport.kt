@@ -7,6 +7,12 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 
+internal fun userEventsUrl(baseUrl: String, token: String) =
+    baseUrl.toHttpUrl().newBuilder()
+        .addPathSegments("ws/user")
+        .addQueryParameter("token", token)
+        .build()
+
 class UserEventsTransport(
     private val client: OkHttpClient,
     private val baseUrl: String,
@@ -17,11 +23,7 @@ class UserEventsTransport(
     private var socket: WebSocket? = null
 
     fun connect() {
-        val url = baseUrl.toHttpUrl().newBuilder()
-            .scheme(if (baseUrl.startsWith("https://")) "wss" else "ws")
-            .addPathSegments("ws/user")
-            .addQueryParameter("token", token)
-            .build()
+        val url = userEventsUrl(baseUrl, token)
         socket = client.newWebSocket(
             Request.Builder().url(url).build(),
             object : WebSocketListener() {

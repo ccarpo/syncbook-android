@@ -39,8 +39,9 @@ The app stores one base URL. The default Android emulator URL is:
 http://10.0.2.2:8080
 ```
 
-HTTP requests use `<base>/api/...`. WebSockets use `<base>/ws` and
-`<base>/ws/user`, mapping `http` to `ws` and `https` to `wss`.
+HTTP requests use `<base>/api/...`. The app passes the `http(s)` base URL to
+OkHttp for WebSocket upgrades at `<base>/ws` and `<base>/ws/user`; HTTPS
+connections use `wss`.
 
 ## Cross-client smoke test
 

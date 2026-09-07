@@ -1,3 +1,6 @@
+// UniFFI scaffolding emits a large metadata const array.
+#![allow(clippy::large_const_arrays)]
+
 use std::sync::Mutex;
 
 use yrs::{

@@ -49,10 +49,17 @@ class MainActivity : ComponentActivity() {
             var baseUrl by remember { mutableStateOf(session.baseUrl) }
             MaterialTheme {
                 if (token == null) {
-                    LoginScreen(baseUrl) { newToken ->
-                        session.token = newToken
-                        token = newToken
-                    }
+                    LoginScreen(
+                        baseUrl = baseUrl,
+                        onBaseUrlChanged = {
+                            session.baseUrl = it
+                            baseUrl = session.baseUrl
+                        },
+                        onAuthenticated = { newToken ->
+                            session.token = newToken
+                            token = newToken
+                        },
+                    )
                 } else {
                     NotesScreen(
                         client = httpClient,

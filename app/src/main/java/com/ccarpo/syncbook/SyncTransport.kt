@@ -10,6 +10,13 @@ import okio.ByteString
 import uniffi.syncbook.SyncDoc
 import uniffi.syncbook.SyncDocObserver
 
+internal fun noteSyncUrl(baseUrl: String, noteId: String, token: String) =
+    baseUrl.toHttpUrl().newBuilder()
+        .addPathSegments("ws")
+        .addQueryParameter("noteId", noteId)
+        .addQueryParameter("token", token)
+        .build()
+
 class SyncTransport(
     private val client: OkHttpClient,
     private val baseUrl: String,
@@ -48,12 +55,7 @@ class SyncTransport(
             observing = true
         }
         onStatus(Status.CONNECTING)
-        val url = baseUrl.toHttpUrl().newBuilder()
-            .scheme(if (baseUrl.startsWith("https://")) "wss" else "ws")
-            .addPathSegments("ws")
-            .addQueryParameter("noteId", noteId)
-            .addQueryParameter("token", token)
-            .build()
+        val url = noteSyncUrl(baseUrl, noteId, token)
         socket = client.newWebSocket(
             Request.Builder().url(url).build(),
             listener,
