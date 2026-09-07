@@ -8,6 +8,7 @@ import android.util.Base64
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,10 +31,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.TextFieldValue
@@ -83,6 +89,10 @@ class MainActivity : ComponentActivity() {
     private companion object {
         val httpClient = OkHttpClient()
     }
+}
+
+private class LocalEditGuard {
+    var applying = false
 }
 
 @Composable
@@ -209,8 +219,10 @@ private fun EditorScreen(
     val doc = remember(note.id) {
         SyncDoc().also { persistence.load(note.id, it) }
     }
-    var value by remember(note.id) { mutableStateOf(TextFieldValue(doc.markdown())) }
-    val currentValue by rememberUpdatedState(value)
+    val valueState = remember(note.id) {
+        mutableStateOf(TextFieldValue(doc.markdown()))
+    }
+    val localEdit = remember(note.id) { LocalEditGuard() }
     val api = remember(baseUrl) { ApiClient(client, baseUrl) }
     val scope = rememberCoroutineScope()
     var historyVisible by remember { mutableStateOf(false) }
@@ -219,13 +231,17 @@ private fun EditorScreen(
     var tags by remember(note.id) { mutableStateOf(note.tags.joinToString(", ")) }
     var error by remember { mutableStateOf<String?>(null) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val focusRequester = remember { FocusRequester() }
     val renderObserver = remember(doc) {
         object : SyncDocObserver {
             override fun changed() {
+                if (localEdit.applying) return
                 mainHandler.post {
                     val md = doc.markdown()
+                    val currentValue = valueState.value
                     if (md != currentValue.text) {
-                        value = currentValue.copy(
+                        valueState.value = currentValue.copy(
                             text = md,
                             selection = TextRange(
                                 currentValue.selection.start.coerceAtMost(md.length),
@@ -239,23 +255,29 @@ private fun EditorScreen(
     }
 
     fun applyMarkdown(newValue: TextFieldValue) {
-        value = newValue
+        valueState.value = newValue
         if (newValue.text != doc.markdown()) {
-            doc.setMarkdown(newValue.text)
-            val md = doc.markdown()
-            if (md != newValue.text) {
-                value = newValue.copy(
-                    text = md,
-                    selection = TextRange(
-                        newValue.selection.start.coerceAtMost(md.length),
-                        newValue.selection.end.coerceAtMost(md.length),
-                    ),
-                )
+            localEdit.applying = true
+            try {
+                doc.setMarkdown(newValue.text)
+                val md = doc.markdown()
+                if (md != newValue.text) {
+                    valueState.value = newValue.copy(
+                        text = md,
+                        selection = TextRange(
+                            newValue.selection.start.coerceAtMost(md.length),
+                            newValue.selection.end.coerceAtMost(md.length),
+                        ),
+                    )
+                }
+            } finally {
+                localEdit.applying = false
             }
         }
     }
 
     fun toggleChecklist() {
+        val value = valueState.value
         val text = value.text
         val cursor = value.selection.start.coerceIn(0, text.length)
         val lineStart = text.lastIndexOf('\n', (cursor - 1).coerceAtLeast(0)) + 1
@@ -287,6 +309,31 @@ private fun EditorScreen(
                 ),
             )
         }
+    }
+
+    fun toggleChecked() {
+        val value = valueState.value
+        toggleCheckedLine(value.text, value.selection.start)?.let { text ->
+            applyMarkdown(value.copy(text = text))
+        }
+    }
+
+    fun handleTap(position: Offset) {
+        val layout = textLayout ?: return
+        val value = valueState.value
+        val transform = transformChecklistText(value.text)
+        val transformedOffset = layout.getOffsetForPosition(position)
+        val glyph = checkboxAtTransformedOffset(transform, transformedOffset)
+        if (glyph != null) {
+            val originalOffset = transform.offsetMapping.transformedToOriginal(transformedOffset)
+            toggleCheckedLine(value.text, originalOffset)?.let { text ->
+                applyMarkdown(value.copy(text = text))
+            }
+        } else {
+            val originalOffset = transform.offsetMapping.transformedToOriginal(transformedOffset)
+            valueState.value = value.copy(selection = TextRange(originalOffset))
+        }
+        focusRequester.requestFocus()
     }
 
     DisposableEffect(note.id) {
@@ -328,6 +375,29 @@ private fun EditorScreen(
                 if (!historyVisible) preview = null
             }) { Text(if (historyVisible) "Editor" else "History") }
             OutlinedButton(onClick = ::toggleChecklist) { Text("Checklist") }
+            OutlinedButton(onClick = ::toggleChecked) {
+                val current = valueState.value
+                val cursor = current.selection.start
+                val lineStart = current.text.lastIndexOf(
+                    '\n',
+                    (cursor - 1).coerceAtLeast(0),
+                ) + 1
+                val lineEnd = current.text.indexOf('\n', cursor)
+                    .let { if (it < 0) current.text.length else it }
+                val line = current.text.substring(lineStart, lineEnd)
+                Text(
+                    if (
+                        line.startsWith("- [x] ") ||
+                        line.startsWith("- [X] ") ||
+                        line == "- [x]" ||
+                        line == "- [X]"
+                    ) {
+                        "Undone"
+                    } else {
+                        "Done"
+                    },
+                )
+            }
         }
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -399,28 +469,54 @@ private fun EditorScreen(
             }
             preview?.let {
                 Text("Read-only preview", style = MaterialTheme.typography.titleMedium)
-                Text(it)
+                Text(
+                    ChecklistVisualTransformation().filter(
+                        androidx.compose.ui.text.AnnotatedString(it),
+                    ).text,
+                )
             }
         } else {
-            BasicTextField(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                value = value,
-                onValueChange = ::applyMarkdown,
-                textStyle = MaterialTheme.typography.bodyLarge.copy(
-                    color = MaterialTheme.colorScheme.onSurface,
-                ),
-                decorationBox = { innerTextField ->
-                    Box {
-                        if (value.text.isEmpty()) {
-                            Text(
-                                "Start writing…",
-                                style = TextStyle(color = Color.Gray),
-                            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Final)
+                                val change = event.changes.firstOrNull() ?: continue
+                                if (!change.pressed && change.previousPressed) {
+                                    handleTap(change.position)
+                                    break
+                                }
+                            }
                         }
-                        innerTextField()
-                    }
-                },
-            )
+                    },
+            ) {
+                BasicTextField(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .focusRequester(focusRequester),
+                    value = valueState.value,
+                    onValueChange = ::applyMarkdown,
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = MaterialTheme.colorScheme.onSurface,
+                    ),
+                    visualTransformation = ChecklistVisualTransformation(),
+                    onTextLayout = { textLayout = it },
+                    decorationBox = { innerTextField ->
+                        Box {
+                            if (valueState.value.text.isEmpty()) {
+                                Text(
+                                    "Start writing…",
+                                    style = TextStyle(color = Color.Gray),
+                                )
+                            }
+                            innerTextField()
+                        }
+                    },
+                )
+            }
         }
     }
 }
