@@ -16,6 +16,8 @@ data class Note(
     val title: String,
     val excerpt: String,
     val deleted: Boolean,
+    val tags: List<String>,
+    val owned: Boolean,
 )
 
 data class Snapshot(
@@ -57,6 +59,8 @@ class ApiClient(
                 title = note.optString("title"),
                 excerpt = note.optString("excerpt"),
                 deleted = note.optBoolean("deleted"),
+                tags = note.optJSONArray("tags").toStringList(),
+                owned = note.optBoolean("owned", true),
             )
         }
     }
@@ -68,6 +72,18 @@ class ApiClient(
 
     suspend fun deleteNote(token: String, id: String) {
         request("DELETE", "/api/notes/$id", token)
+    }
+
+    suspend fun setTags(token: String, noteId: String, tags: List<String>): List<String> {
+        val response = JSONObject(
+            request(
+                "PUT",
+                "/api/notes/$noteId/tags",
+                token,
+                JSONObject().put("tags", JSONArray(tags)).toString(),
+            ),
+        )
+        return response.optJSONArray("tags").toStringList()
     }
 
     suspend fun restoreNote(token: String, id: String) {
@@ -151,4 +167,13 @@ private fun JSONObject.toNote() = Note(
     title = optString("title"),
     excerpt = optString("excerpt"),
     deleted = optBoolean("deleted"),
+    tags = optJSONArray("tags").toStringList(),
+    owned = optBoolean("owned", true),
 )
+
+private fun JSONArray?.toStringList(): List<String> =
+    if (this == null) {
+        emptyList()
+    } else {
+        (0 until length()).map { index -> getString(index) }
+    }

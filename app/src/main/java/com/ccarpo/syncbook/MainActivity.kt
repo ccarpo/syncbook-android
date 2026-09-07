@@ -1,13 +1,15 @@
 package com.ccarpo.syncbook
 
+import android.content.Context
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.content.Context
 import android.util.Base64
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,8 +17,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -28,26 +30,28 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
-import uniffi.syncbook.BlockKind
 import uniffi.syncbook.SyncDoc
 import uniffi.syncbook.SyncDocObserver
 
 class MainActivity : ComponentActivity() {
-    private val httpClient = OkHttpClient()
+    private val session by lazy { SessionStore(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val session = SessionStore(this)
         setContent {
-            var token by remember { mutableStateOf(session.token) }
-            var baseUrl by remember { mutableStateOf(session.baseUrl) }
             MaterialTheme {
+                var token by remember { mutableStateOf(session.token) }
+                var baseUrl by remember { mutableStateOf(session.baseUrl) }
                 if (token == null) {
                     LoginScreen(
                         baseUrl = baseUrl,
@@ -55,9 +59,9 @@ class MainActivity : ComponentActivity() {
                             session.baseUrl = it
                             baseUrl = session.baseUrl
                         },
-                        onAuthenticated = { newToken ->
-                            session.token = newToken
-                            token = newToken
+                        onAuthenticated = {
+                            session.token = it
+                            token = it
                         },
                     )
                 } else {
@@ -65,10 +69,6 @@ class MainActivity : ComponentActivity() {
                         client = httpClient,
                         token = token!!,
                         baseUrl = baseUrl,
-                        onBaseUrlChanged = {
-                            session.baseUrl = it
-                            baseUrl = session.baseUrl
-                        },
                         context = applicationContext,
                         onLogout = {
                             session.token = null
@@ -79,6 +79,10 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    private companion object {
+        val httpClient = OkHttpClient()
+    }
 }
 
 @Composable
@@ -86,13 +90,11 @@ private fun NotesScreen(
     client: OkHttpClient,
     token: String,
     baseUrl: String,
-    onBaseUrlChanged: (String) -> Unit,
     context: Context,
     onLogout: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val api = remember(baseUrl) { ApiClient(client, baseUrl) }
-    var editableBaseUrl by remember(baseUrl) { mutableStateOf(baseUrl) }
     var notes by remember { mutableStateOf<List<Note>>(emptyList()) }
     var trash by remember { mutableStateOf(false) }
     var search by remember { mutableStateOf("") }
@@ -114,6 +116,7 @@ private fun NotesScreen(
         onDispose { events.close() }
     }
 
+    BackHandler(enabled = selected != null) { selected = null }
     selected?.let { note ->
         EditorScreen(client, token, baseUrl, context, note, onLogout) { selected = null }
         return
@@ -148,23 +151,14 @@ private fun NotesScreen(
             label = { Text("Search") },
             singleLine = true,
         )
-        OutlinedTextField(
-            modifier = Modifier.fillMaxWidth(),
-            value = editableBaseUrl,
-            onValueChange = { editableBaseUrl = it },
-            label = { Text("Server base URL") },
-            singleLine = true,
-        )
-        OutlinedButton(onClick = { onBaseUrlChanged(editableBaseUrl) }) {
-            Text("Save server URL")
-        }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         LazyColumn {
             items(
                 notes.filter {
                     search.isBlank() ||
                         it.title.contains(search, ignoreCase = true) ||
-                        it.excerpt.contains(search, ignoreCase = true)
+                        it.excerpt.contains(search, ignoreCase = true) ||
+                        it.tags.any { tag -> tag.contains(search, ignoreCase = true) }
                 },
                 key = { it.id },
             ) { note ->
@@ -173,7 +167,15 @@ private fun NotesScreen(
                         modifier = Modifier.weight(1f),
                         onClick = { selected = note },
                     ) {
-                        Text(note.title.ifBlank { "Untitled note" })
+                        Column {
+                            Text(note.title.ifBlank { "Untitled note" })
+                            if (note.tags.isNotEmpty()) {
+                                Text(
+                                    note.tags.joinToString(" ") { "#$it" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
                     }
                     OutlinedButton(onClick = {
                         scope.launch {
@@ -207,25 +209,88 @@ private fun EditorScreen(
     val doc = remember(note.id) {
         SyncDoc().also { persistence.load(note.id, it) }
     }
-    var blocks by remember(note.id) { mutableStateOf(doc.blocks()) }
+    var value by remember(note.id) { mutableStateOf(TextFieldValue(doc.markdown())) }
+    val currentValue by rememberUpdatedState(value)
     val api = remember(baseUrl) { ApiClient(client, baseUrl) }
     val scope = rememberCoroutineScope()
     var historyVisible by remember { mutableStateOf(false) }
     var snapshots by remember { mutableStateOf<List<Snapshot>>(emptyList()) }
-    var preview by remember { mutableStateOf<List<uniffi.syncbook.Block>?>(null) }
+    var preview by remember { mutableStateOf<String?>(null) }
+    var tags by remember(note.id) { mutableStateOf(note.tags.joinToString(", ")) }
+    var error by remember { mutableStateOf<String?>(null) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val renderObserver = remember(doc) {
         object : SyncDocObserver {
             override fun changed() {
-                mainHandler.post { blocks = doc.blocks() }
+                mainHandler.post {
+                    val md = doc.markdown()
+                    if (md != currentValue.text) {
+                        value = currentValue.copy(
+                            text = md,
+                            selection = TextRange(
+                                currentValue.selection.start.coerceAtMost(md.length),
+                                currentValue.selection.end.coerceAtMost(md.length),
+                            ),
+                        )
+                    }
+                }
             }
         }
     }
-    DisposableEffect(doc) {
-        doc.observe(renderObserver)
-        onDispose { doc.clearObservers() }
+
+    fun applyMarkdown(newValue: TextFieldValue) {
+        value = newValue
+        if (newValue.text != doc.markdown()) {
+            doc.setMarkdown(newValue.text)
+            val md = doc.markdown()
+            if (md != newValue.text) {
+                value = newValue.copy(
+                    text = md,
+                    selection = TextRange(
+                        newValue.selection.start.coerceAtMost(md.length),
+                        newValue.selection.end.coerceAtMost(md.length),
+                    ),
+                )
+            }
+        }
     }
+
+    fun toggleChecklist() {
+        val text = value.text
+        val cursor = value.selection.start.coerceIn(0, text.length)
+        val lineStart = text.lastIndexOf('\n', (cursor - 1).coerceAtLeast(0)) + 1
+        val lineEnd = text.indexOf('\n', cursor).let { if (it < 0) text.length else it }
+        val line = text.substring(lineStart, lineEnd)
+        val prefixLength = when {
+            line.startsWith("- [ ] ") || line.startsWith("- [x] ") || line.startsWith("- [X] ") -> 6
+            line == "- [ ]" || line == "- [x]" || line == "- [X]" -> 5
+            else -> 0
+        }
+        if (prefixLength > 0) {
+            applyMarkdown(
+                value.copy(
+                    text = text.removeRange(lineStart, lineStart + prefixLength),
+                    selection = TextRange(
+                        (value.selection.start - prefixLength).coerceAtLeast(0),
+                        (value.selection.end - prefixLength).coerceAtLeast(0),
+                    ),
+                ),
+            )
+        } else {
+            applyMarkdown(
+                value.copy(
+                    text = text.substring(0, lineStart) + "- [ ] " + text.substring(lineStart),
+                    selection = TextRange(
+                        value.selection.start + 6,
+                        value.selection.end + 6,
+                    ),
+                ),
+            )
+        }
+    }
+
     DisposableEffect(note.id) {
+        doc.observe(renderObserver)
         val transport = SyncTransport(
             client = client,
             baseUrl = baseUrl,
@@ -238,10 +303,20 @@ private fun EditorScreen(
         transport.connect()
         onDispose {
             transport.close()
+            doc.clearObservers()
             persistence.save(note.id, doc)
             doc.close()
         }
     }
+    BackHandler {
+        if (historyVisible) {
+            historyVisible = false
+            preview = null
+        } else {
+            onBack()
+        }
+    }
+
     Column(
         modifier = Modifier.fillMaxSize().padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -252,11 +327,39 @@ private fun EditorScreen(
                 historyVisible = !historyVisible
                 if (!historyVisible) preview = null
             }) { Text(if (historyVisible) "Editor" else "History") }
+            OutlinedButton(onClick = ::toggleChecklist) { Text("Checklist") }
         }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedTextField(
+                modifier = Modifier.weight(1f),
+                value = tags,
+                onValueChange = { tags = it },
+                label = { Text("Tags (comma separated)") },
+                singleLine = true,
+            )
+            OutlinedButton(onClick = {
+                scope.launch {
+                    runCatching {
+                        api.setTags(
+                            token,
+                            note.id,
+                            tags.split(',').map { it.trim() }.filter { it.isNotEmpty() },
+                        )
+                    }
+                        .onSuccess { tags = it.joinToString(", ") }
+                        .onFailure { error = it.message }
+                }
+            }) { Text("Save tags") }
+        }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (historyVisible) {
             LaunchedEffect(Unit) {
                 runCatching { api.history(token, note.id) }
                     .onSuccess { snapshots = it }
+                    .onFailure { error = it.message }
             }
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(snapshots, key = { it.id }) { snapshot ->
@@ -276,9 +379,10 @@ private fun EditorScreen(
                                         snapshotDoc.applyUpdate(
                                             Base64.decode(detail.state, Base64.DEFAULT),
                                         )
-                                        preview = snapshotDoc.blocks()
+                                        preview = snapshotDoc.markdown()
                                         snapshotDoc.close()
                                     }
+                                    .onFailure { error = it.message }
                             }
                         }) { Text("Preview") }
                         Button(onClick = {
@@ -287,110 +391,36 @@ private fun EditorScreen(
                                     api.restoreSnapshot(token, note.id, snapshot.id)
                                 }.onSuccess {
                                     historyVisible = false
-                                }
+                                }.onFailure { error = it.message }
                             }
                         }) { Text("Restore") }
                     }
                 }
             }
-            preview?.let { previewBlocks ->
+            preview?.let {
                 Text("Read-only preview", style = MaterialTheme.typography.titleMedium)
-                previewBlocks.forEach { block ->
-                    Row(modifier = Modifier.fillMaxWidth()) {
-                        if (block.kind == BlockKind.TASK_ITEM) {
-                            Checkbox(checked = block.checked, onCheckedChange = null)
-                        }
-                        Text(block.text, modifier = Modifier.padding(8.dp))
-                    }
-                }
+                Text(it)
             }
         } else {
-            if (blocks.isEmpty()) {
-                OutlinedTextField(
-                    modifier = Modifier.fillMaxWidth(),
-                    value = "",
-                    onValueChange = { value ->
-                        if (value.isNotEmpty()) {
-                            doc.insertText("", 0u, value)
-                            blocks = doc.blocks()
+            BasicTextField(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                value = value,
+                onValueChange = ::applyMarkdown,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+                decorationBox = { innerTextField ->
+                    Box {
+                        if (value.text.isEmpty()) {
+                            Text(
+                                "Start writing…",
+                                style = TextStyle(color = Color.Gray),
+                            )
                         }
-                    },
-                    label = { Text("Start writing") },
-                )
-            }
-            blocks.forEachIndexed { index, block ->
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    if (block.kind == BlockKind.TASK_ITEM) {
-                        Checkbox(
-                            checked = block.checked,
-                            onCheckedChange = {
-                                doc.setChecked(block.id, it)
-                                blocks = doc.blocks()
-                            },
-                        )
+                        innerTextField()
                     }
-                    if (block.kind == BlockKind.PARAGRAPH) {
-                        OutlinedButton(onClick = {
-                            doc.toggleTaskList(block.id)
-                            blocks = doc.blocks()
-                        }) { Text("Checklist") }
-                    }
-                    OutlinedTextField(
-                        modifier = Modifier.weight(1f),
-                        value = block.text,
-                        singleLine = false,
-                        onValueChange = { value ->
-                            val newline = value.indexOf('\n')
-                            if (newline >= 0) {
-                                val before = value.substring(0, newline)
-                                val after = value.substring(newline + 1)
-                                applyTextEdit(doc, block.id, block.text, before)
-                                doc.splitBlock(block.id, before.utf16Length().toUInt())
-                                if (after.isNotEmpty()) {
-                                    val next = doc.blocks().getOrNull(index + 1)
-                                    if (next != null) {
-                                        doc.insertText(next.id, 0u, after)
-                                    }
-                                }
-                            } else {
-                                applyTextEdit(doc, block.id, block.text, value)
-                            }
-                            blocks = doc.blocks()
-                        },
-                    )
-                }
-            }
+                },
+            )
         }
-    }
-}
-
-private fun String.utf16Length(): Int = length
-
-private fun applyTextEdit(doc: SyncDoc, blockId: String, oldText: String, newText: String) {
-    var prefix = 0
-    while (
-        prefix < oldText.length &&
-        prefix < newText.length &&
-        oldText[prefix] == newText[prefix]
-    ) {
-        prefix++
-    }
-    var oldSuffix = oldText.length
-    var newSuffix = newText.length
-    while (
-        oldSuffix > prefix &&
-        newSuffix > prefix &&
-        oldText[oldSuffix - 1] == newText[newSuffix - 1]
-    ) {
-        oldSuffix--
-        newSuffix--
-    }
-    val deleteLength = oldSuffix - prefix
-    if (deleteLength > 0) {
-        doc.deleteText(blockId, prefix.toUInt(), deleteLength.toUInt())
-    }
-    val inserted = newText.substring(prefix, newSuffix)
-    if (inserted.isNotEmpty()) {
-        doc.insertText(blockId, prefix.toUInt(), inserted)
     }
 }

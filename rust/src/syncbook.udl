@@ -25,6 +25,8 @@ interface SyncDoc {
     bytes encode_state_as_update(bytes? state_vector);
     sequence<bytes> handle_message(bytes message);
     sequence<Block> blocks();
+    string markdown();
+    void set_markdown(string text);
     void insert_text(string block_id, u32 offset, string text);
     void delete_text(string block_id, u32 offset, u32 length);
     void set_checked(string block_id, boolean checked);
