@@ -141,10 +141,8 @@ internal fun transformChecklistText(text: String): ChecklistTransform {
 }
 
 internal fun toggleCheckedLine(text: String, cursor: Int): String? {
-    val position = cursor.coerceIn(0, text.length)
-    val lineStart = text.lastIndexOf('\n', (position - 1).coerceAtLeast(0)) + 1
-    val lineEnd = text.indexOf('\n', position).let { if (it < 0) text.length else it }
-    val line = text.substring(lineStart, lineEnd)
+    val lineStart = lineStartAt(text, cursor)
+    val line = lineAt(text, cursor)
     val replacement = when {
         line.startsWith("- [ ] ") -> "- [x] "
         line.startsWith("- [x] ") -> "- [ ] "
@@ -154,6 +152,23 @@ internal fun toggleCheckedLine(text: String, cursor: Int): String? {
         else -> return null
     }
     return text.substring(0, lineStart) + replacement + text.substring(lineStart + replacement.length)
+}
+
+internal fun lineAt(text: String, offset: Int): String {
+    val lineStart = lineStartAt(text, offset)
+    val lineEnd = text.indexOf('\n', lineStart).let { if (it < 0) text.length else it }
+    return text.substring(lineStart, lineEnd)
+}
+
+internal fun isCheckedLine(line: String): Boolean =
+    line.startsWith("- [x] ") ||
+        line.startsWith("- [X] ") ||
+        line == "- [x]" ||
+        line == "- [X]"
+
+private fun lineStartAt(text: String, offset: Int): Int {
+    val position = offset.coerceIn(0, text.length)
+    return text.lastIndexOf('\n', (position - 1).coerceAtLeast(0)) + 1
 }
 
 internal fun checkboxAtTransformedOffset(

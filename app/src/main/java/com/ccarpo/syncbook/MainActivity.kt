@@ -35,10 +35,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -232,7 +231,6 @@ private fun EditorScreen(
     var error by remember { mutableStateOf<String?>(null) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
-    val focusRequester = remember { FocusRequester() }
     val renderObserver = remember(doc) {
         object : SyncDocObserver {
             override fun changed() {
@@ -281,8 +279,7 @@ private fun EditorScreen(
         val text = value.text
         val cursor = value.selection.start.coerceIn(0, text.length)
         val lineStart = text.lastIndexOf('\n', (cursor - 1).coerceAtLeast(0)) + 1
-        val lineEnd = text.indexOf('\n', cursor).let { if (it < 0) text.length else it }
-        val line = text.substring(lineStart, lineEnd)
+        val line = lineAt(text, cursor)
         val prefixLength = when {
             line.startsWith("- [ ] ") || line.startsWith("- [x] ") || line.startsWith("- [X] ") -> 6
             line == "- [ ]" || line == "- [x]" || line == "- [X]" -> 5
@@ -329,11 +326,7 @@ private fun EditorScreen(
             toggleCheckedLine(value.text, originalOffset)?.let { text ->
                 applyMarkdown(value.copy(text = text))
             }
-        } else {
-            val originalOffset = transform.offsetMapping.transformedToOriginal(transformedOffset)
-            valueState.value = value.copy(selection = TextRange(originalOffset))
         }
-        focusRequester.requestFocus()
     }
 
     DisposableEffect(note.id) {
@@ -378,25 +371,7 @@ private fun EditorScreen(
             OutlinedButton(onClick = ::toggleChecked) {
                 val current = valueState.value
                 val cursor = current.selection.start
-                val lineStart = current.text.lastIndexOf(
-                    '\n',
-                    (cursor - 1).coerceAtLeast(0),
-                ) + 1
-                val lineEnd = current.text.indexOf('\n', cursor)
-                    .let { if (it < 0) current.text.length else it }
-                val line = current.text.substring(lineStart, lineEnd)
-                Text(
-                    if (
-                        line.startsWith("- [x] ") ||
-                        line.startsWith("- [X] ") ||
-                        line == "- [x]" ||
-                        line == "- [X]"
-                    ) {
-                        "Undone"
-                    } else {
-                        "Done"
-                    },
-                )
+                Text(if (isCheckedLine(lineAt(current.text, cursor))) "Undone" else "Done")
             }
         }
         Row(
@@ -471,7 +446,7 @@ private fun EditorScreen(
                 Text("Read-only preview", style = MaterialTheme.typography.titleMedium)
                 Text(
                     ChecklistVisualTransformation().filter(
-                        androidx.compose.ui.text.AnnotatedString(it),
+                        AnnotatedString(it),
                     ).text,
                 )
             }
@@ -482,11 +457,25 @@ private fun EditorScreen(
                     .weight(1f)
                     .pointerInput(Unit) {
                         awaitEachGesture {
+                            var downPosition: Offset? = null
+                            var downTime = 0L
                             while (true) {
                                 val event = awaitPointerEvent(PointerEventPass.Final)
                                 val change = event.changes.firstOrNull() ?: continue
-                                if (!change.pressed && change.previousPressed) {
-                                    handleTap(change.position)
+                                if (change.pressed && !change.previousPressed) {
+                                    downPosition = change.position
+                                    downTime = change.uptimeMillis
+                                } else if (!change.pressed && change.previousPressed) {
+                                    val down = downPosition
+                                    if (
+                                        down != null &&
+                                            (change.position - down).getDistance() <=
+                                            viewConfiguration.touchSlop &&
+                                            change.uptimeMillis - downTime <
+                                            viewConfiguration.longPressTimeoutMillis
+                                    ) {
+                                        handleTap(change.position)
+                                    }
                                     break
                                 }
                             }
@@ -495,8 +484,7 @@ private fun EditorScreen(
             ) {
                 BasicTextField(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .focusRequester(focusRequester),
+                        .fillMaxSize(),
                     value = valueState.value,
                     onValueChange = ::applyMarkdown,
                     textStyle = MaterialTheme.typography.bodyLarge.copy(
