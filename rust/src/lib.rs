@@ -3,6 +3,7 @@
 
 use std::sync::Mutex;
 
+use yrs::types::xml::XmlIn;
 use yrs::{
     doc::{OffsetKind, Options},
     encoding::read::Cursor,
@@ -32,6 +33,21 @@ pub struct Block {
     pub kind: BlockKind,
     pub text: String,
     pub checked: bool,
+}
+
+#[derive(Clone)]
+struct ParsedBlock {
+    task: bool,
+    checked: bool,
+    text: String,
+}
+
+#[derive(Clone)]
+struct FlatBlock {
+    element: yrs::XmlElementRef,
+    task: bool,
+    checked: bool,
+    text: String,
 }
 
 pub struct SyncDoc {
@@ -135,6 +151,62 @@ impl SyncDoc {
         let root = doc.get_or_insert_xml_fragment("prosemirror");
         let txn = doc.transact();
         top_level_blocks(&root, &txn)
+    }
+
+    pub fn markdown(&self) -> String {
+        let doc = self.doc.lock().unwrap();
+        let root = doc.get_or_insert_xml_fragment("prosemirror");
+        let txn = doc.transact();
+        flat_block_refs(&root, &txn)
+            .into_iter()
+            .map(|block| {
+                if block.task {
+                    format!(
+                        "- [{}] {}",
+                        if block.checked { "x" } else { " " },
+                        block.text
+                    )
+                } else {
+                    block.text
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    pub fn set_markdown(&self, text: String) {
+        let parsed = parse_markdown(&text);
+        {
+            let doc = self.doc.lock().unwrap();
+            let mut txn = doc.transact_mut();
+            let root = txn.get_or_insert_xml_fragment("prosemirror");
+            let old = flat_block_refs(&root, &txn);
+            let prefix = common_prefix(&old, &parsed);
+            let suffix = common_suffix(&old, &parsed, prefix);
+            let old_middle_end = old.len().saturating_sub(suffix);
+            let new_middle_end = parsed.len().saturating_sub(suffix);
+            let old_middle = &old[prefix..old_middle_end];
+            let new_middle = &parsed[prefix..new_middle_end];
+
+            if old_middle.len() == new_middle.len()
+                && old_middle
+                    .iter()
+                    .zip(new_middle)
+                    .all(|(old, new)| old.task == new.task)
+            {
+                for (old, new) in old_middle.iter().zip(new_middle) {
+                    update_block(&mut txn, old, new);
+                }
+            } else {
+                for old in old_middle.iter().rev() {
+                    remove_flat_block(&mut txn, &root, &old.element);
+                }
+                for (offset, new) in new_middle.iter().enumerate() {
+                    insert_flat_block(&mut txn, &root, prefix + offset, new);
+                }
+            }
+        }
+        self.notify_observers();
     }
 
     pub fn insert_text(&self, block_id: String, offset: u32, text: String) {
@@ -280,12 +352,8 @@ impl SyncDoc {
         let doc = self.doc.lock().unwrap();
         let txn = &mut doc.transact_mut();
         if let Some(element) = find_element(txn, block_id) {
-            if let Some(XmlOut::Text(text)) = element.get(txn, 0) {
-                operation(txn, text);
-            } else {
-                let text = element.push_back(txn, XmlTextPrelim::new(""));
-                operation(txn, text);
-            }
+            let text = block_text_ref(txn, &element);
+            operation(txn, text);
         }
     }
 }
@@ -362,6 +430,326 @@ fn top_level_blocks<T: yrs::ReadTxn>(root: &yrs::XmlFragmentRef, txn: &T) -> Vec
     blocks
 }
 
+fn parse_markdown(text: &str) -> Vec<ParsedBlock> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+    text.split('\n')
+        .map(|line| {
+            let (task, checked, content) = if let Some(content) = line.strip_prefix("- [ ] ") {
+                (true, false, content)
+            } else if let Some(content) = line.strip_prefix("- [x] ") {
+                (true, true, content)
+            } else if let Some(content) = line.strip_prefix("- [X] ") {
+                (true, true, content)
+            } else if line == "- [ ]" {
+                (true, false, "")
+            } else if matches!(line, "- [x]" | "- [X]") {
+                (true, true, "")
+            } else {
+                (false, false, line)
+            };
+            ParsedBlock {
+                task,
+                checked,
+                text: content.to_string(),
+            }
+        })
+        .collect()
+}
+
+fn flat_block_refs<T: yrs::ReadTxn>(root: &yrs::XmlFragmentRef, txn: &T) -> Vec<FlatBlock> {
+    let mut blocks = Vec::new();
+    for index in 0..root.len(txn) {
+        let Some(XmlOut::Element(element)) = root.get(txn, index) else {
+            continue;
+        };
+        match element.tag().as_ref() {
+            "paragraph" => blocks.push(FlatBlock {
+                element: element.clone(),
+                task: false,
+                checked: false,
+                text: element_text(&element, txn),
+            }),
+            "taskList" => {
+                for child_index in 0..element.len(txn) {
+                    let Some(XmlOut::Element(item)) = element.get(txn, child_index) else {
+                        continue;
+                    };
+                    if item.tag().as_ref() == "taskItem" {
+                        blocks.push(FlatBlock {
+                            element: item.clone(),
+                            task: true,
+                            checked: item
+                                .get_attribute(txn, "checked")
+                                .map(|value| value.to_string(txn) == "true")
+                                .unwrap_or(false),
+                            text: element_text(&item, txn),
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    blocks
+}
+
+fn common_prefix(old: &[FlatBlock], new: &[ParsedBlock]) -> usize {
+    old.iter()
+        .zip(new)
+        .take_while(|(old, new)| {
+            old.task == new.task && old.checked == new.checked && old.text == new.text
+        })
+        .count()
+}
+
+fn common_suffix(old: &[FlatBlock], new: &[ParsedBlock], prefix: usize) -> usize {
+    old.iter()
+        .rev()
+        .zip(new.iter().rev())
+        .take_while(|(old, new)| {
+            old.task == new.task && old.checked == new.checked && old.text == new.text
+        })
+        .take(old.len().saturating_sub(prefix))
+        .take(new.len().saturating_sub(prefix))
+        .count()
+}
+
+fn update_block(txn: &mut yrs::TransactionMut<'_>, old: &FlatBlock, new: &ParsedBlock) {
+    if old.text != new.text {
+        let text = block_text_ref(txn, &old.element);
+        replace_text(txn, text, &old.text, &new.text);
+    }
+    if old.task && old.checked != new.checked {
+        old.element
+            .insert_attribute(txn, "checked", new.checked.to_string());
+    }
+}
+
+fn replace_text(txn: &mut yrs::TransactionMut<'_>, text: yrs::XmlTextRef, old: &str, new: &str) {
+    let old_units = old.encode_utf16().count() as u32;
+    let new_units = new.encode_utf16().count() as u32;
+    let old_chars: Vec<char> = old.chars().collect();
+    let new_chars: Vec<char> = new.chars().collect();
+    let mut prefix_chars = 0;
+    while prefix_chars < old_chars.len()
+        && prefix_chars < new_chars.len()
+        && old_chars[prefix_chars] == new_chars[prefix_chars]
+    {
+        prefix_chars += 1;
+    }
+    let mut suffix_chars = 0;
+    while suffix_chars < old_chars.len().saturating_sub(prefix_chars)
+        && suffix_chars < new_chars.len().saturating_sub(prefix_chars)
+        && old_chars[old_chars.len() - 1 - suffix_chars]
+            == new_chars[new_chars.len() - 1 - suffix_chars]
+    {
+        suffix_chars += 1;
+    }
+    let prefix: u32 = old_chars[..prefix_chars]
+        .iter()
+        .map(|character| character.len_utf16() as u32)
+        .sum();
+    let suffix: u32 = old_chars[old_chars.len() - suffix_chars..]
+        .iter()
+        .map(|character| character.len_utf16() as u32)
+        .sum();
+    let old_middle = old_units.saturating_sub(prefix + suffix);
+    if old_middle > 0 {
+        text.remove_range(txn, prefix, old_middle);
+    }
+    let inserted = utf16_slice(new, prefix, new_units.saturating_sub(suffix));
+    if !inserted.is_empty() {
+        text.insert(txn, prefix, inserted);
+    }
+}
+
+fn utf16_slice(text: &str, start: u32, end: u32) -> &str {
+    fn byte_offset(text: &str, target: u32) -> usize {
+        let mut units = 0;
+        for (index, character) in text.char_indices() {
+            if units == target {
+                return index;
+            }
+            units += character.len_utf16() as u32;
+        }
+        text.len()
+    }
+    let start_byte = byte_offset(text, start);
+    let end_byte = byte_offset(text, end);
+    &text[start_byte..end_byte]
+}
+
+fn block_text_ref(
+    txn: &mut yrs::TransactionMut<'_>,
+    element: &yrs::XmlElementRef,
+) -> yrs::XmlTextRef {
+    if element.tag().as_ref() == "taskItem" {
+        let paragraph = (0..element.len(txn)).find_map(|index| match element.get(txn, index) {
+            Some(XmlOut::Element(child)) if child.tag().as_ref() == "paragraph" => Some(child),
+            _ => None,
+        });
+        let paragraph = paragraph
+            .unwrap_or_else(|| element.push_back(txn, XmlElementPrelim::empty("paragraph")));
+        if let Some(XmlOut::Text(text)) = paragraph.get(txn, 0) {
+            text
+        } else {
+            paragraph.push_back(txn, XmlTextPrelim::new(""))
+        }
+    } else if let Some(XmlOut::Text(text)) = element.get(txn, 0) {
+        text
+    } else {
+        element.push_back(txn, XmlTextPrelim::new(""))
+    }
+}
+
+fn remove_flat_block(
+    txn: &mut yrs::TransactionMut<'_>,
+    root: &yrs::XmlFragmentRef,
+    element: &yrs::XmlElementRef,
+) {
+    match element.parent() {
+        Some(XmlOut::Fragment(parent)) => {
+            let index = fragment_element_index(&parent, txn, &element_id(element));
+            parent.remove_range(txn, index, 1);
+        }
+        Some(XmlOut::Element(parent)) => {
+            let index = element_element_index(&parent, txn, &element_id(element));
+            parent.remove_range(txn, index, 1);
+            if parent.len(txn) == 0 {
+                let index = fragment_element_index(root, txn, &element_id(&parent));
+                root.remove_range(txn, index, 1);
+            }
+        }
+        Some(XmlOut::Text(_)) | None => {}
+    }
+}
+
+fn insert_flat_block(
+    txn: &mut yrs::TransactionMut<'_>,
+    root: &yrs::XmlFragmentRef,
+    position: usize,
+    block: &ParsedBlock,
+) {
+    let current = flat_block_refs(root, txn);
+    let previous = position.checked_sub(1).and_then(|index| current.get(index));
+    let next = current.get(position);
+    if block.task {
+        if let Some(previous) = previous.filter(|block| block.task) {
+            let Some(XmlOut::Element(list)) = previous.element.parent() else {
+                return;
+            };
+            let index = element_element_index(&list, txn, &element_id(&previous.element));
+            insert_task_item(txn, &list, index + 1, block);
+        } else if let Some(next) = next.filter(|block| block.task) {
+            let Some(XmlOut::Element(list)) = next.element.parent() else {
+                return;
+            };
+            insert_task_item(txn, &list, 0, block);
+        } else {
+            let index = top_level_insert_index(root, txn, previous, next);
+            let list = root.insert(txn, index, XmlElementPrelim::empty("taskList"));
+            insert_task_item(txn, &list, 0, block);
+        }
+    } else if let (Some(previous), Some(next)) = (previous, next) {
+        if previous.task && next.task {
+            let Some(XmlOut::Element(previous_list)) = previous.element.parent() else {
+                return;
+            };
+            let Some(XmlOut::Element(next_list)) = next.element.parent() else {
+                return;
+            };
+            if previous_list == next_list {
+                split_task_list(txn, root, &previous_list, &next.element);
+                let index = fragment_element_index(root, txn, &element_id(&previous_list)) + 1;
+                root.insert(txn, index, paragraph_prelim(block));
+                return;
+            }
+        }
+        let index = top_level_insert_index(root, txn, Some(previous), Some(next));
+        root.insert(txn, index, paragraph_prelim(block));
+    } else {
+        let index = top_level_insert_index(root, txn, previous, next);
+        root.insert(txn, index, paragraph_prelim(block));
+    }
+}
+
+fn insert_task_item(
+    txn: &mut yrs::TransactionMut<'_>,
+    list: &yrs::XmlElementRef,
+    index: u32,
+    block: &ParsedBlock,
+) {
+    let item = list.insert(txn, index, XmlElementPrelim::empty("taskItem"));
+    item.insert_attribute(txn, "checked", block.checked.to_string());
+    let paragraph = item.push_back(txn, XmlElementPrelim::empty("paragraph"));
+    paragraph.push_back(txn, XmlTextPrelim::new(block.text.clone()));
+}
+
+fn paragraph_prelim(block: &ParsedBlock) -> XmlElementPrelim {
+    XmlElementPrelim::new(
+        "paragraph",
+        [XmlIn::Text(XmlTextPrelim::new(block.text.clone()).into())],
+    )
+}
+
+fn top_level_insert_index<T: yrs::ReadTxn>(
+    root: &yrs::XmlFragmentRef,
+    txn: &T,
+    previous: Option<&FlatBlock>,
+    next: Option<&FlatBlock>,
+) -> u32 {
+    if let Some(previous) = previous {
+        let top = top_level_element(previous, txn);
+        return fragment_element_index(root, txn, &element_id(&top)) + 1;
+    }
+    if let Some(next) = next {
+        let top = top_level_element(next, txn);
+        return fragment_element_index(root, txn, &element_id(&top));
+    }
+    root.len(txn)
+}
+
+fn top_level_element<T: yrs::ReadTxn>(block: &FlatBlock, txn: &T) -> yrs::XmlElementRef {
+    if !block.task {
+        return block.element.clone();
+    }
+    let Some(XmlOut::Element(list)) = block.element.parent() else {
+        return block.element.clone();
+    };
+    let _ = txn;
+    list
+}
+
+fn split_task_list(
+    txn: &mut yrs::TransactionMut<'_>,
+    root: &yrs::XmlFragmentRef,
+    list: &yrs::XmlElementRef,
+    next: &yrs::XmlElementRef,
+) {
+    let next_index = element_element_index(list, txn, &element_id(next));
+    let tail: Vec<ParsedBlock> = (next_index..list.len(txn))
+        .filter_map(|index| match list.get(txn, index) {
+            Some(XmlOut::Element(item)) if item.tag().as_ref() == "taskItem" => Some(ParsedBlock {
+                task: true,
+                checked: item
+                    .get_attribute(txn, "checked")
+                    .map(|value| value.to_string(txn) == "true")
+                    .unwrap_or(false),
+                text: element_text(&item, txn),
+            }),
+            _ => None,
+        })
+        .collect();
+    list.remove_range(txn, next_index, list.len(txn) - next_index);
+    let list_index = fragment_element_index(root, txn, &element_id(list));
+    let new_list = root.insert(txn, list_index + 1, XmlElementPrelim::empty("taskList"));
+    for block in tail {
+        insert_task_item(txn, &new_list, new_list.len(txn), &block);
+    }
+}
+
 fn element_text<T: yrs::ReadTxn>(element: &yrs::XmlElementRef, txn: &T) -> String {
     (0..element.len(txn))
         .filter_map(|index| match element.get(txn, index) {
@@ -373,19 +761,25 @@ fn element_text<T: yrs::ReadTxn>(element: &yrs::XmlElementRef, txn: &T) -> Strin
 }
 
 fn fragment_element_index<T: yrs::ReadTxn>(parent: &yrs::XmlFragmentRef, txn: &T, id: &str) -> u32 {
-    parent
-        .successors(txn)
-        .position(|node| matches!(&node, XmlOut::Element(candidate) if element_id(candidate) == id))
-        .map(|index| index as u32)
-        .unwrap_or(parent.len(txn))
+    for index in 0..parent.len(txn) {
+        if let Some(XmlOut::Element(candidate)) = parent.get(txn, index) {
+            if element_id(&candidate) == id {
+                return index;
+            }
+        }
+    }
+    parent.len(txn)
 }
 
 fn element_element_index<T: yrs::ReadTxn>(parent: &yrs::XmlElementRef, txn: &T, id: &str) -> u32 {
-    parent
-        .successors(txn)
-        .position(|node| matches!(&node, XmlOut::Element(candidate) if element_id(candidate) == id))
-        .map(|index| index as u32)
-        .unwrap_or(parent.len(txn))
+    for index in 0..parent.len(txn) {
+        if let Some(XmlOut::Element(candidate)) = parent.get(txn, index) {
+            if element_id(&candidate) == id {
+                return index;
+            }
+        }
+    }
+    parent.len(txn)
 }
 
 fn append_block_text(element: &yrs::XmlElementRef, txn: &mut yrs::TransactionMut<'_>, text: &str) {
@@ -526,5 +920,116 @@ mod tests {
         restored.apply_update(snapshot);
 
         assert_eq!(restored.blocks()[0].text, "snapshot");
+    }
+
+    #[test]
+    fn markdown_round_trips_mixed_document() {
+        let doc = SyncDoc::new();
+        doc.set_markdown("intro\n- [ ] open\n- [x] done\noutro".to_string());
+
+        assert_eq!(doc.markdown(), "intro\n- [ ] open\n- [x] done\noutro");
+        let blocks = doc.blocks();
+        assert_eq!(blocks.len(), 4);
+        assert!(matches!(blocks[0].kind, BlockKind::Paragraph));
+        assert!(matches!(blocks[1].kind, BlockKind::TaskItem));
+        assert!(matches!(blocks[2].kind, BlockKind::TaskItem));
+        assert!(matches!(blocks[3].kind, BlockKind::Paragraph));
+        assert!(!blocks[1].checked);
+        assert!(blocks[2].checked);
+    }
+
+    #[test]
+    fn markdown_line_edit_preserves_block_ids() {
+        let doc = SyncDoc::new();
+        doc.set_markdown("first\nsecond\nthird".to_string());
+        let before = doc.blocks();
+
+        doc.set_markdown("first\nseXond\nthird".to_string());
+
+        let after = doc.blocks();
+        assert_eq!(
+            before.iter().map(|block| &block.id).collect::<Vec<_>>(),
+            after.iter().map(|block| &block.id).collect::<Vec<_>>()
+        );
+        assert_eq!(after[0].text, "first");
+        assert_eq!(after[1].text, "seXond");
+        assert_eq!(after[2].text, "third");
+    }
+
+    #[test]
+    fn markdown_toggle_wraps_paragraph_in_task_list() {
+        let doc = SyncDoc::new();
+        doc.set_markdown("one\noutside".to_string());
+        doc.set_markdown("- [ ] one\noutside".to_string());
+
+        assert!(matches!(doc.blocks()[0].kind, BlockKind::TaskItem));
+        let binding = doc.doc.lock().unwrap();
+        let txn = binding.transact();
+        let root = txn.get_xml_fragment("prosemirror").unwrap();
+        assert_eq!(root.len(&txn), 2);
+        let XmlOut::Element(first) = root.get(&txn, 0).unwrap() else {
+            panic!("expected task list");
+        };
+        assert_eq!(first.tag().as_ref(), "taskList");
+    }
+
+    #[test]
+    fn markdown_paragraph_after_task_is_outside_list() {
+        let doc = SyncDoc::new();
+        doc.set_markdown("- [ ] task\nparagraph".to_string());
+
+        let binding = doc.doc.lock().unwrap();
+        let txn = binding.transact();
+        let root = txn.get_xml_fragment("prosemirror").unwrap();
+        assert_eq!(root.len(&txn), 2);
+        let XmlOut::Element(first) = root.get(&txn, 0).unwrap() else {
+            panic!("expected task list");
+        };
+        let XmlOut::Element(second) = root.get(&txn, 1).unwrap() else {
+            panic!("expected paragraph");
+        };
+        assert_eq!(first.tag().as_ref(), "taskList");
+        assert_eq!(second.tag().as_ref(), "paragraph");
+    }
+
+    #[test]
+    fn markdown_task_after_task_joins_list() {
+        let doc = SyncDoc::new();
+        doc.set_markdown("- [ ] first\n- [ ] second".to_string());
+
+        let binding = doc.doc.lock().unwrap();
+        let txn = binding.transact();
+        let root = txn.get_xml_fragment("prosemirror").unwrap();
+        let XmlOut::Element(list) = root.get(&txn, 0).unwrap() else {
+            panic!("expected task list");
+        };
+        assert_eq!(list.tag().as_ref(), "taskList");
+        assert_eq!(list.len(&txn), 2);
+    }
+
+    #[test]
+    fn concurrent_markdown_edits_converge() {
+        let left = SyncDoc::new();
+        let right = SyncDoc::new();
+        left.set_markdown("left\nright".to_string());
+        sync_pair(&left, &right);
+
+        left.set_markdown("left edited\nright".to_string());
+        right.set_markdown("left\nright edited".to_string());
+        sync_pair(&left, &right);
+
+        assert_eq!(left.markdown(), right.markdown());
+        assert!(left.markdown().contains("left edited"));
+        assert!(left.markdown().contains("right edited"));
+    }
+
+    #[test]
+    fn empty_markdown_empties_document() {
+        let doc = SyncDoc::new();
+        doc.set_markdown("content\n- [ ] task".to_string());
+        doc.set_markdown(String::new());
+
+        assert!(doc.blocks().is_empty());
+        assert_eq!(doc.markdown(), "");
     }
 }
