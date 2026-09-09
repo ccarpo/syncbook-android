@@ -216,7 +216,8 @@ private fun removePrefixOffset(offset: Int, lineStart: Int, prefixLength: Int): 
 
 private fun lineStartAt(text: String, offset: Int): Int {
     val position = offset.coerceIn(0, text.length)
-    return text.lastIndexOf('\n', (position - 1).coerceAtLeast(0)) + 1
+    if (position == 0) return 0
+    return text.lastIndexOf('\n', position - 1) + 1
 }
 
 internal fun checkboxAtTransformedOffset(
