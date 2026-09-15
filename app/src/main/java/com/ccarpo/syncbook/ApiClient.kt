@@ -127,7 +127,11 @@ class ApiClient(
         body: String? = null,
     ): String = suspendCancellableCoroutine { continuation ->
         val url = "$baseUrl$path".toHttpUrl()
-        val requestBody = body?.toRequestBody(jsonMediaType)
+        val requestBody = when {
+            body != null -> body.toRequestBody(jsonMediaType)
+            method == "POST" || method == "PUT" || method == "PATCH" -> "{}".toRequestBody(jsonMediaType)
+            else -> null
+        }
         val request = Request.Builder()
             .url(url)
             .method(method, requestBody)
