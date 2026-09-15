@@ -34,6 +34,7 @@ fun LoginScreen(
     var password by remember { mutableStateOf("") }
     var registering by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -55,14 +56,21 @@ fun LoginScreen(
         )
         Button(
             modifier = Modifier.fillMaxWidth(),
+            enabled = !busy,
             onClick = {
+                if (busy) return@Button
+                busy = true
+                error = null
+                val url = serverUrl.trim().trimEnd('/')
                 scope.launch {
                     runCatching {
-                        val url = serverUrl.trim().trimEnd('/')
-                        onBaseUrlChanged(url)
                         val api = ApiClient(OkHttpClient(), url)
                         if (registering) api.register(email, password) else api.login(email, password)
-                    }.onSuccess(onAuthenticated).onFailure { error = it.message }
+                    }.onSuccess {
+                        onBaseUrlChanged(url)
+                        onAuthenticated(it)
+                    }.onFailure { error = it.message }
+                    busy = false
                 }
             },
         ) {
