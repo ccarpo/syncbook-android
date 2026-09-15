@@ -53,6 +53,12 @@ export CROSS_CLIENT_BASE_URL=http://localhost:8080
 ```
 
 The test authenticates through the nginx-proxied origin, connects Rust-backed
-documents through `/ws`, verifies remote changes reach the rendered block
-model, checks server-derived metadata, and verifies Android-created task-item
-content.
+documents through `/ws`, verifies remote changes reach the Android markdown
+editor, and checks server-derived metadata. In the web client, lines beginning
+with `- [ ] ` or `- [x] ` appear as real checklist items.
+
+## Editor
+
+The Android editor is one plain-text field. Lines beginning with `- [ ] ` or
+`- [x] ` represent checklist items, and map to the TipTap task-list shape used
+by the web client.
