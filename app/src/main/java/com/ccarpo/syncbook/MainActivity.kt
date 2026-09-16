@@ -15,11 +15,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -35,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -423,7 +427,47 @@ private fun EditorScreen(
                     .onSuccess { snapshots = it }
                     .onFailure { error = it.message }
             }
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            preview?.let { snapshotPreview ->
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "Read-only preview",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        OutlinedButton(onClick = { preview = null }) {
+                            Text("Close preview")
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 220.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        Text(
+                            ChecklistVisualTransformation().filter(
+                                AnnotatedString(snapshotPreview),
+                            ).text,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                color = MaterialTheme.colorScheme.onSurface,
+                            ),
+                        )
+                    }
+                }
+            }
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 items(snapshots, key = { it.id }) { snapshot ->
                     OutlinedTextField(
                         modifier = Modifier.fillMaxWidth(),
@@ -434,16 +478,22 @@ private fun EditorScreen(
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = {
+                            error = null
                             scope.launch {
-                                runCatching { api.snapshot(token, note.id, snapshot.id) }
-                                    .onSuccess { detail ->
-                                        val snapshotDoc = SyncDoc()
+                                runCatching {
+                                    val detail = api.snapshot(token, note.id, snapshot.id)
+                                    val snapshotDoc = SyncDoc()
+                                    try {
                                         snapshotDoc.applyUpdate(
                                             Base64.decode(detail.state, Base64.DEFAULT),
                                         )
-                                        preview = snapshotDoc.markdown()
+                                        snapshotDoc.markdown()
+                                    } finally {
                                         snapshotDoc.close()
                                     }
+                                }.onSuccess { markdown ->
+                                    preview = markdown
+                                }
                                     .onFailure { error = it.message }
                             }
                         }) { Text("Preview") }
@@ -458,14 +508,6 @@ private fun EditorScreen(
                         }) { Text("Restore") }
                     }
                 }
-            }
-            preview?.let {
-                Text("Read-only preview", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    ChecklistVisualTransformation().filter(
-                        AnnotatedString(it),
-                    ).text,
-                )
             }
         } else {
             Box(
